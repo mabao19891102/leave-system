@@ -1,0 +1,612 @@
+{% extends "base.html" %}
+{% block title %}申请中心{% endblock %}
+{% block content %}
+<div class="page-header">
+    <h1>📝 申请中心</h1>
+    <p class="text-muted">提交请假、加班、调休补假申请 · 查看申请记录</p>
+</div>
+
+<div class="app-type-cards">
+    <div class="app-type-card" onclick="{% if role == 'viewer' %}alert('查看模式，无法提交申请'){% else %}showApply('请假'){% endif %}">
+        <div class="app-icon">✈️</div>
+        <div class="app-name">请假申请</div>
+        <div class="app-desc">年假 / 调休假</div>
+    </div>
+    <div class="app-type-card" onclick="{% if role == 'viewer' %}alert('查看模式，无法提交申请'){% else %}showApply('加班'){% endif %}">
+        <div class="app-icon">⏰</div>
+        <div class="app-name">加班申请</div>
+        <div class="app-desc">记录加班时间</div>
+    </div>
+    <div class="app-type-card" onclick="{% if role == 'viewer' %}alert('查看模式，无法提交申请'){% else %}showApply('调休补假'){% endif %}">
+        <div class="app-icon">🔄</div>
+        <div class="app-name">调休补假</div>
+        <div class="app-desc">使用调休余额请假</div>
+    </div>
+</div>
+{% if role == 'viewer' %}
+<div style="text-align:center;padding:8px;margin-bottom:10px;color:#8899c0;font-size:13px;background:rgba(255,255,255,0.03);border-radius:8px;">👁️ 查看模式 · 仅浏览申请记录</div>
+{% endif %}
+
+<div class="card mt-3">
+    <div class="card-header">
+        <h2>📋 申请记录</h2>
+        <div class="header-actions">
+            <button class="btn btn-sm btn-primary" onclick="exportExcel()">📥 导出Excel</button>
+        </div>
+    </div>
+    <div class="card-body">
+        <!-- Filters -->
+        <div class="filter-bar">
+            <div class="filter-item">
+                <label>类型</label>
+                <select id="appTypeFilter" onchange="loadApps()">
+                    <option value="">全部</option>
+                    <option value="请假">请假</option>
+                    <option value="加班">加班</option>
+                    <option value="调休补假">调休补假</option>
+                </select>
+            </div>
+            <div class="filter-item">
+                <label>状态</label>
+                <select id="appStatusFilter" onchange="loadApps()">
+                    <option value="">全部</option>
+                    <option value="待审批">待审批</option>
+                    <option value="已批准">已批准</option>
+                    <option value="已驳回">已驳回</option>
+                </select>
+            </div>
+            <div class="filter-item">
+                <label>开始日期</label>
+                <input type="date" id="filterDateFrom" onchange="loadApps()">
+            </div>
+            <div class="filter-item">
+                <label>结束日期</label>
+                <input type="date" id="filterDateTo" onchange="loadApps()">
+            </div>
+            {% if is_admin %}
+            <div class="filter-item">
+                <label>员工姓名</label>
+                <select id="filterEmpName" onchange="loadApps()">
+                    <option value="">全部员工</option>
+                </select>
+            </div>
+            {% endif %}
+            <div class="filter-item filter-btn">
+                <button class="btn btn-sm btn-outline" onclick="resetFilters()">重置</button>
+            </div>
+            <div class="filter-count" id="resultCount"></div>
+        </div>
+    </div>
+    <div class="card-body p-0" id="appList">
+        <div class="text-center p-4">加载中...</div>
+    </div>
+</div>
+
+<!-- Application Modal -->
+<div class="modal" id="appModal">
+    <div class="modal-content" style="width:540px;">
+        <div class="modal-header">
+            <h2 id="modalTitle">提交申请</h2>
+            <span class="close" onclick="closeModal()">&times;</span>
+        </div>
+        <div class="modal-body" id="modalBody"></div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let myInfo = null;
+
+async function loadMyInfo() {
+    const res = await fetch('/api/employees/my-info');
+    myInfo = await res.json();
+}
+
+async function loadApps() {
+    const type = document.getElementById('appTypeFilter').value;
+    const status = document.getElementById('appStatusFilter').value;
+    const dateFrom = document.getElementById('filterDateFrom').value;
+    const dateTo = document.getElementById('filterDateTo').value;
+    const empName = document.getElementById('filterEmpName')?.value?.trim() || '';
+
+    const params = new URLSearchParams();
+    if (type) params.set('app_type', type);
+    if (status) params.set('status', status);
+    if (dateFrom) params.set('date_from', dateFrom);
+    if (dateTo) params.set('date_to', dateTo);
+    if (empName) params.set('emp_name', empName);
+
+    const res = await fetch(`/api/applications?${params}`);
+    const apps = await res.json();
+    renderApps(apps);
+}
+
+function renderApps(apps) {
+    const container = document.getElementById('appList');
+    document.getElementById('resultCount').textContent = `共 ${apps.length} 条记录`;
+
+    if (!apps.length) {
+        container.innerHTML = '<div class="empty-state">暂无记录，点击上方卡片提交申请</div>';
+        return;
+    }
+
+    let html = `<div class="table-scroll"><table class="table"><thead><tr>
+        <th>申请人</th><th>类型</th><th>详情</th><th>原因</th><th>状态</th><th>审批人</th><th>审批时间</th><th>提交时间</th>
+    </tr></thead><tbody>`;
+
+    apps.forEach(a => {
+        // Format dates - extract date part if time is appended
+        const sd = (a.start_date || '').substring(0, 10);
+        const ed = (a.end_date || '').substring(0, 10);
+        const st = (a.start_date || '').substring(11, 16);
+        const et = (a.end_date || '').substring(11, 16);
+        const timeStr = (st && et) ? `<br><small class="text-muted">${st} ~ ${et}</small>` : '';
+
+        let detail = '';
+        if (a.app_type == '请假') detail = `${a.leave_type} ${a.days}天<br><small>${sd} ~ ${ed}</small>${timeStr}`;
+        else if (a.app_type == '加班') detail = `${sd}<br><small>${a.overtime_hours}小时 → ${a.days}天调休</small>`;
+        else if (a.app_type == '调休补假') detail = `${a.days}天<br><small>${sd} ~ ${ed}</small>${timeStr}`;
+
+        const approver = a.approver || '-';
+        // Format approval time - extract date portion from updated_at if status is approved/rejected
+        let approvalTime = '-';
+        if (a.status !== '待审批' && a.updated_at) {
+            approvalTime = a.updated_at.slice(0, 16);
+        }
+        const submitTime = a.created_at ? a.created_at.slice(0, 16) : '';
+
+        html += `<tr>
+            <td><strong>${a.emp_name}</strong><br><small class="text-muted">${a.emp_code}</small></td>
+            <td><span class="tag tag-${a.app_type}">${a.app_type}</span></td>
+            <td>${detail}</td>
+            <td><small>${a.reason || '-'}</small></td>
+            <td><span class="status status-${a.status}">${a.status}</span></td>
+            <td><small>${approver}</small></td>
+            <td><small>${approvalTime}</small></td>
+            <td><small>${submitTime}</small></td>
+        </tr>`;
+    });
+
+    html += '</tbody></table></div>';
+    container.innerHTML = html;
+}
+
+function resetFilters() {
+    document.getElementById('appTypeFilter').value = '';
+    document.getElementById('appStatusFilter').value = '';
+    document.getElementById('filterDateFrom').value = '';
+    document.getElementById('filterDateTo').value = '';
+    const empInput = document.getElementById('filterEmpName');
+    if (empInput) empInput.value = '';
+    loadApps();
+}
+
+// ── Export ──────────────────────────────────────────────
+
+async function exportExcel() {
+    const type = document.getElementById('appTypeFilter').value;
+    const status = document.getElementById('appStatusFilter').value;
+    const dateFrom = document.getElementById('filterDateFrom').value;
+    const dateTo = document.getElementById('filterDateTo').value;
+    const empName = document.getElementById('filterEmpName')?.value?.trim() || '';
+
+    const params = new URLSearchParams();
+    if (type) params.set('app_type', type);
+    if (status) params.set('status', status);
+    if (dateFrom) params.set('date_from', dateFrom);
+    if (dateTo) params.set('date_to', dateTo);
+    if (empName) params.set('emp_name', empName);
+    params.set('export', '1');
+
+    const res = await fetch(`/api/applications?${params}`);
+    const apps = await res.json();
+
+    // Build CSV with BOM for Excel
+    const headers = ['申请人', '工号', '申请类型', '请假类型', '开始日期', '结束日期', '天数',
+                     '加班日期', '加班时长(h)', '加班类型', '事由',
+                     '状态', '审批人', '审批意见', '提交时间', '审批时间'];
+
+    let csv = '\uFEFF' + headers.join(',') + '\n';
+
+    apps.forEach(a => {
+        const row = [
+            a.emp_name,
+            a.emp_code,
+            a.app_type,
+            a.leave_type || '',
+            a.start_date || '',
+            a.end_date || '',
+            a.days || '',
+            a.overtime_date || '',
+            a.overtime_hours || '',
+            a.overtime_type || '',
+            (a.reason || '').replace(/,/g, '，'),
+            a.status,
+            a.approver || '',
+            (a.approver_comment || '').replace(/,/g, '，'),
+            a.created_at || '',
+            a.status !== '待审批' && a.updated_at ? a.updated_at : ''
+        ];
+        // Escape fields with commas
+        const escaped = row.map(v => {
+            const s = String(v);
+            return s.includes(',') ? `"${s}"` : s;
+        });
+        csv += escaped.join(',') + '\n';
+    });
+
+    const blob = new Blob([csv], {type: 'text/csv;charset=utf-8;'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    const now = new Date().toISOString().slice(0, 10);
+    a.href = url;
+    a.download = `假期申请记录_${now}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+}
+
+// ── Show Application Forms ─────────────────────────────
+
+function showApply(type) {
+    const modal = document.getElementById('appModal');
+    const title = document.getElementById('modalTitle');
+    const body = document.getElementById('modalBody');
+
+    if (type === '请假') {
+        title.textContent = '✈️ 请假申请';
+        body.innerHTML = getLeaveForm();
+    } else if (type === '加班') {
+        title.textContent = '⏰ 加班申请';
+        body.innerHTML = getOvertimeForm();
+    } else if (type === '调休补假') {
+        title.textContent = '🔄 调休补假申请';
+        body.innerHTML = getCompLeaveForm();
+    }
+    modal.style.display = 'flex';
+}
+
+function closeModal() {
+    document.getElementById('appModal').style.display = 'none';
+    const r = document.getElementById('submitResult');
+    if (r) r.innerHTML = '';
+}
+
+// ── Leave Application Form ──────────────────────────────
+
+function getLeaveForm() {
+    const today = new Date().toISOString().slice(0,10);
+    const annBal = myInfo?.remaining_annual ?? 0;
+    const compBal = myInfo?.remaining_comp ?? 0;
+    const annDays = Math.floor(annBal);
+    const annHours = Math.round((annBal - annDays) * 8);
+    const compDays = Math.floor(compBal);
+    const compHours = Math.round((compBal - compDays) * 8);
+    return `
+    <div class="form-group">
+        <label>请假类型</label>
+        <select id="fLeaveType" class="form-select" onchange="previewLeave()">
+            <option value="年假">年假（剩余 ${annDays > 0 ? annDays + '天 ' : ''}${annHours}小时）</option>
+            <option value="调休假">调休假（剩余 ${compDays > 0 ? compDays + '天 ' : ''}${compHours}小时）</option>
+        </select>
+    </div>
+    <div class="form-row">
+        <div class="form-group half">
+            <label>开始日期</label>
+            <input type="date" id="fStart" value="${today}" onchange="previewLeave()">
+        </div>
+        <div class="form-group half">
+            <label>开始时间</label>
+            <input type="time" id="fStartTime" value="09:00" onchange="previewLeave()">
+        </div>
+    </div>
+    <div class="form-row">
+        <div class="form-group half">
+            <label>结束日期</label>
+            <input type="date" id="fEnd" value="${today}" onchange="previewLeave()">
+        </div>
+        <div class="form-group half">
+            <label>结束时间</label>
+            <input type="time" id="fEndTime" value="18:00" onchange="previewLeave()">
+        </div>
+    </div>
+    <div class="form-group">
+        <label>时长（小时）</label>
+        <input type="number" id="fLeaveHours" step="0.5" min="0.5" value="8" onchange="previewLeave()">
+        <small class="form-hint">根据时间范围自动计算，也可手动调整</small>
+    </div>
+    <div class="calc-preview" id="leavePreview">📅 将使用 <strong>1天 0小时</strong></div>
+    <div class="form-group">
+        <label>事由</label>
+        <textarea id="fReason" rows="2" placeholder="请简述请假原因..."></textarea>
+    </div>
+    <button class="btn btn-primary" onclick="submitLeave()">📨 提交申请</button>
+    <div id="submitResult" class="mt-2"></div>`;
+}
+
+function previewLeave() {
+    const startDate = document.getElementById('fStart').value;
+    const endDate = document.getElementById('fEnd').value;
+    const startTime = document.getElementById('fStartTime').value;
+    const endTime = document.getElementById('fEndTime').value;
+    const leaveType = document.getElementById('fLeaveType').value;
+
+    let hours = parseFloat(document.getElementById('fLeaveHours').value) || 0;
+    if (startDate && endDate && startTime && endTime && startDate === endDate) {
+        const [sh, sm] = startTime.split(':').map(Number);
+        const [eh, em] = endTime.split(':').map(Number);
+        const diff = (eh * 60 + em) - (sh * 60 + sm);
+        if (diff > 0) {
+            hours = Math.round(diff / 60 * 10) / 10;
+            document.getElementById('fLeaveHours').value = hours;
+        }
+    }
+    const useDays = Math.floor(hours / 4) / 2;
+    const useHours = Math.round(hours - (useDays * 8));
+    const balance = leaveType === '年假' ? (myInfo?.remaining_annual ?? 0) : (myInfo?.remaining_comp ?? 0);
+    const dayStr = useDays > 0 ? `${useDays}天 ` : '';
+    document.getElementById('leavePreview').innerHTML =
+        `📅 ${startDate} ${startTime} ~ ${endDate} ${endTime} · ${hours}小时<br>` +
+        `将使用 <strong>${dayStr}${parseInt(useHours)}小时</strong>（余额${balance}天）`;
+}
+
+async function submitLeave() {
+    const hours = parseFloat(document.getElementById('fLeaveHours').value) || 0;
+    const days = Math.floor(hours / 4) / 2;
+    if (days <= 0) {
+        document.getElementById('submitResult').innerHTML = '❌ 请填写有效时长';
+        return;
+    }
+    const data = {
+        app_type: '请假',
+        leave_type: document.getElementById('fLeaveType').value,
+        start_date: document.getElementById('fStart').value,
+        start_time: document.getElementById('fStartTime').value,
+        end_date: document.getElementById('fEnd').value,
+        end_time: document.getElementById('fEndTime').value,
+        days: days,
+        reason: document.getElementById('fReason').value
+    };
+    if (!data.start_date || !data.end_date) {
+        document.getElementById('submitResult').innerHTML = '❌ 请选择日期范围';
+        return;
+    }
+    await doSubmit(data);
+}
+
+// ── Overtime Application Form ──────────────────────────
+
+function getOvertimeForm() {
+    const today = new Date().toISOString().slice(0,10);
+    return `
+    <div class="form-group">
+        <label>加班类型</label>
+        <select id="fOtType" class="form-select" onchange="previewOt()">
+            <option value="休息日加班">休息日加班</option>
+            <option value="工作日加班">工作日加班</option>
+            <option value="法定假日加班">法定假日加班（1.5倍调休）</option>
+        </select>
+    </div>
+    <div class="form-row">
+        <div class="form-group half">
+            <label>开始日期</label>
+            <input type="date" id="fOtStart" value="${today}" onchange="previewOt()">
+        </div>
+        <div class="form-group half">
+            <label>开始时间</label>
+            <input type="time" id="fOtStartTime" value="18:00" onchange="previewOt()">
+        </div>
+    </div>
+    <div class="form-row">
+        <div class="form-group half">
+            <label>结束日期</label>
+            <input type="date" id="fOtEnd" value="${today}" onchange="previewOt()">
+        </div>
+        <div class="form-group half">
+            <label>结束时间</label>
+            <input type="time" id="fOtEndTime" value="22:00" onchange="previewOt()">
+        </div>
+    </div>
+    <div class="form-group">
+        <label>加班时长（小时）</label>
+        <input type="number" id="fOtHours" step="0.5" min="0.5" value="4" onchange="previewOt()">
+        <small class="form-hint">系统会根据时间范围自动计算，也可手动调整</small>
+    </div>
+    <div class="calc-preview" id="otPreview">⏱ 审批通过后将获得 <strong>0.5</strong> 天调休假</div>
+    <div class="form-group">
+        <label>说明</label>
+        <textarea id="fOtReason" rows="2" placeholder="如：值班、备班、紧急任务..."></textarea>
+    </div>
+    <button class="btn btn-primary" onclick="submitOvertime()">📨 提交申请</button>
+    <div id="submitResult" class="mt-2"></div>`;
+}
+
+function previewOt() {
+    const startDate = document.getElementById('fOtStart').value;
+    const endDate = document.getElementById('fOtEnd').value;
+    const startTime = document.getElementById('fOtStartTime').value;
+    const endTime = document.getElementById('fOtEndTime').value;
+    const type = document.getElementById('fOtType').value;
+
+    let hours = parseFloat(document.getElementById('fOtHours').value) || 0;
+    if (startDate && endDate && startTime && endTime && startDate === endDate) {
+        const [sh, sm] = startTime.split(':').map(Number);
+        const [eh, em] = endTime.split(':').map(Number);
+        const diff = (eh * 60 + em) - (sh * 60 + sm);
+        if (diff > 0) {
+            hours = Math.round(diff / 60 * 10) / 10;
+            document.getElementById('fOtHours').value = hours;
+        }
+    }
+    const rate = type === '法定假日加班' ? 1.5 : 1;
+    const compHours = hours * rate;
+    const compDays = Math.floor(compHours / 4) / 2;
+    const compRemainder = Math.round(compHours - (compDays * 8));
+    const dayStr = compDays > 0 ? `${compDays}天 ` : '';
+    document.getElementById('otPreview').innerHTML =
+        `⏱ ${startDate} ${startTime} ~ ${endDate} ${endTime} · ${hours}小时<br>` +
+        `审批通过后将获得 <strong>${dayStr}${parseInt(compRemainder)}小时</strong> 调休假`;
+}
+
+async function submitOvertime() {
+    const hours = parseFloat(document.getElementById('fOtHours').value) || 0;
+    const rate = document.getElementById('fOtType').value === '法定假日加班' ? 1.5 : 1;
+    const comp = Math.round(hours * rate / 8 * 10) / 10;
+    const data = {
+        app_type: '加班',
+        start_date: document.getElementById('fOtStart').value,
+        start_time: document.getElementById('fOtStartTime').value,
+        end_date: document.getElementById('fOtEnd').value,
+        end_time: document.getElementById('fOtEndTime').value,
+        overtime_hours: hours,
+        overtime_type: document.getElementById('fOtType').value,
+        days: comp,
+        reason: document.getElementById('fOtReason').value
+    };
+    if (!data.start_date || !data.overtime_hours) {
+        document.getElementById('submitResult').innerHTML = '❌ 请填写完整信息';
+        return;
+    }
+    await doSubmit(data);
+}
+
+// ── Comp Leave Form ────────────────────────────────────
+
+function getCompLeaveForm() {
+    const today = new Date().toISOString().slice(0,10);
+    return `
+    <div class="form-group">
+        <label>可用调休余额</label>
+        <div class="balance-display">${myInfo?.remaining_comp ?? 0} 天</div>
+    </div>
+    <div class="form-row">
+        <div class="form-group half">
+            <label>开始日期</label>
+            <input type="date" id="fCompStart" value="${today}" onchange="previewComp()">
+        </div>
+        <div class="form-group half">
+            <label>开始时间</label>
+            <input type="time" id="fCompStartTime" value="09:00" onchange="previewComp()">
+        </div>
+    </div>
+    <div class="form-row">
+        <div class="form-group half">
+            <label>结束日期</label>
+            <input type="date" id="fCompEnd" value="${today}" onchange="previewComp()">
+        </div>
+        <div class="form-group half">
+            <label>结束时间</label>
+            <input type="time" id="fCompEndTime" value="18:00" onchange="previewComp()">
+        </div>
+    </div>
+    <div class="form-group">
+        <label>时长（小时）</label>
+        <input type="number" id="fCompHours" step="0.5" min="0.5" value="8" onchange="previewComp()">
+        <small class="form-hint">系统根据时间范围自动计算，也可手动调整</small>
+    </div>
+    <div class="calc-preview" id="compPreview">📅 将使用调休假 <strong>1.0天 0小时</strong></div>
+    <div class="form-group">
+        <label>事由</label>
+        <textarea id="fCompReason" rows="2" placeholder="请简述原因..."></textarea>
+    </div>
+    <button class="btn btn-primary" onclick="submitCompLeave()">📨 提交申请</button>
+    <div id="submitResult" class="mt-2"></div>`;
+}
+
+function previewComp() {
+    const startDate = document.getElementById('fCompStart').value;
+    const endDate = document.getElementById('fCompEnd').value;
+    const startTime = document.getElementById('fCompStartTime').value;
+    const endTime = document.getElementById('fCompEndTime').value;
+
+    let hours = parseFloat(document.getElementById('fCompHours').value) || 0;
+    if (startDate && endDate && startTime && endTime) {
+        const [sh, sm] = startTime.split(':').map(Number);
+        const [eh, em] = endTime.split(':').map(Number);
+        const dayDiff = (new Date(endDate) - new Date(startDate)) / (1000*60*60*24);
+        if (startDate === endDate && startTime && endTime) {
+            const diff = (eh * 60 + em) - (sh * 60 + sm);
+            if (diff > 0) {
+                hours = Math.round(diff / 60 * 10) / 10;
+                document.getElementById('fCompHours').value = hours;
+            }
+        } else if (dayDiff >= 1) {
+            // Multi-day: keep manual entry
+        }
+    }
+    // Convert hours to days + hours display (same logic as overtime)
+    const useDays = Math.floor(hours / 4) / 2;
+    const useHours = Math.round(hours - (useDays * 8));
+    const bal = myInfo?.remaining_comp ?? 0;
+    const bDays = Math.floor(bal);
+    const bHours = Math.round((bal - bDays) * 8);
+    const balStr = bDays > 0 ? `${bDays}天 ` : '';
+    document.getElementById('compPreview').innerHTML =
+        `📅 ${startDate} ${startTime} ~ ${endDate} ${endTime} · ${hours}小时<br>` +
+        `将使用调休假 <strong>${useDays > 0 ? useDays + '天 ' : ''}${parseInt(useHours)}小时</strong>` +
+        `（余额 ${balStr}${bHours}小时）`;
+}
+
+async function submitCompLeave() {
+    const hours = parseFloat(document.getElementById('fCompHours').value) || 0;
+    const days = Math.floor(hours / 4) / 2;  // 转换为天（半天粒度）
+    if (days <= 0) {
+        document.getElementById('submitResult').innerHTML = '❌ 请填写有效时长';
+        return;
+    }
+    if (days > (myInfo?.remaining_comp ?? 0)) {
+        document.getElementById('submitResult').innerHTML = `❌ 调休余额不足！剩余${myInfo?.remaining_comp ?? 0}天`;
+        return;
+    }
+    const data = {
+        app_type: '调休补假',
+        start_date: document.getElementById('fCompStart').value,
+        start_time: document.getElementById('fCompStartTime').value,
+        end_date: document.getElementById('fCompEnd').value,
+        end_time: document.getElementById('fCompEndTime').value,
+        days: days,
+        reason: document.getElementById('fCompReason').value
+    };
+    if (!data.start_date || !data.end_date) {
+        document.getElementById('submitResult').innerHTML = '❌ 请选择日期范围';
+        return;
+    }
+    await doSubmit(data);
+}
+
+// ── Unified Submit ─────────────────────────────────────
+
+async function doSubmit(data) {
+    const resultDiv = document.getElementById('submitResult');
+    resultDiv.innerHTML = '⏳ 提交中...';
+    try {
+        const res = await fetch('/api/applications/create', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(data)
+        });
+        const result = await res.json();
+        resultDiv.innerHTML = result.success ? `✅ ${result.message}` : `❌ ${result.error}`;
+        if (result.success) {
+            setTimeout(() => { closeModal(); loadApps(); }, 1500);
+        }
+    } catch(e) {
+        resultDiv.innerHTML = `❌ 提交失败: ${e.message}`;
+    }
+}
+
+async function loadEmployeesDropdown() {
+    const select = document.getElementById('filterEmpName');
+    if (!select) return;
+    const res = await fetch('/api/employees');
+    const emps = await res.json();
+    select.innerHTML = '<option value="">全部员工</option>' +
+        emps.map(e => `<option value="${e.name}">${e.name} (${e.employee_id})</option>`).join('');
+}
+
+// On page load
+loadMyInfo();
+loadEmployeesDropdown();
+loadApps();
+</script>
+{% endblock %}
