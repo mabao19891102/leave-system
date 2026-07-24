@@ -1,0 +1,166 @@
+{% extends "base.html" %}
+{% block title %}加班管理{% endblock %}
+{% block content %}
+<div class="page-header">
+    <h1>⏰ 加班管理</h1>
+    <p class="text-muted">记录加班 · 自动换算调休假</p>
+</div>
+
+<div class="toolbar">
+    <button class="btn btn-primary" onclick="showAddOvertime()">➕ 记录加班</button>
+    <button class="btn btn-success" onclick="autoSettle()">🔄 结算全部调休</button>
+</div>
+
+<div class="info-card mb-3">
+    <strong>💡 加班换算规则：</strong>
+    工作日加班 8小时 → 1天调休 · 休息日加班 8小时 → 1天调休 · 法定假日加班 8小时 → 1.5天调休
+</div>
+
+<div class="card">
+    <div class="card-header">
+        <h2>加班记录</h2>
+    </div>
+    <div class="card-body p-0">
+        <table class="table" id="overtimeTable">
+            <thead>
+                <tr><th>员工</th><th>加班日期</th><th>类型</th><th>时长(h)</th><th>产生调休(天)</th><th>说明</th><th>状态</th></tr>
+            </thead>
+            <tbody id="overtimeBody">
+                <tr><td colspan="7" class="text-center">加载中...</td></tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- Add Overtime Modal -->
+<div class="modal" id="overtimeModal">
+    <div class="modal-content" style="width:480px;">
+        <div class="modal-header">
+            <h2>➕ 记录加班</h2>
+            <span class="close" onclick="closeModal('overtimeModal')">&times;</span>
+        </div>
+        <div class="modal-body">
+            <div class="form-group">
+                <label>员工</label>
+                <select id="otEmpId" class="form-select"></select>
+            </div>
+            <div class="form-group">
+                <label>加班日期</label>
+                <input type="date" id="otDate">
+            </div>
+            <div class="form-group">
+                <label>加班类型</label>
+                <select id="otType" class="form-select" onchange="previewCompDays()">
+                    <option value="工作日加班">工作日加班</option>
+                    <option value="休息日加班" selected>休息日加班</option>
+                    <option value="法定假日加班">法定假日加班</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>加班时长（小时）</label>
+                <input type="number" id="otHours" step="0.5" min="0.5" value="8" onchange="previewCompDays()">
+            </div>
+            <div class="form-group">
+                <label>说明</label>
+                <input type="text" id="otDesc" placeholder="如：值班/备班/紧急任务等">
+            </div>
+            <div class="calc-preview" id="compPreview">
+                预计产生调休假: <strong>1.0</strong> 天
+            </div>
+            <button class="btn btn-primary" onclick="submitOvertime()">提交记录</button>
+            <div id="otResult" class="mt-2"></div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+async function loadOvertime() {
+    const res = await fetch('/api/overtime');
+    const records = await res.json();
+    const tbody = document.getElementById('overtimeBody');
+    if (!records.length) {
+        tbody.innerHTML = '<tr><td colspan="7" class="text-center">暂无加班记录</td></tr>';
+        return;
+    }
+    tbody.innerHTML = records.map(r => `
+        <tr>
+            <td><strong>${r.emp_name}</strong></td>
+            <td>${r.overtime_date}</td>
+            <td><span class="tag tag-ot">${r.overtime_type}</span></td>
+            <td>${r.hours}</td>
+            <td><span class="tag tag-blue">${r.comp_days_earned}</span></td>
+            <td>${r.description || '-'}</td>
+            <td><span class="status status-${r.status === '已结算' ? '已批准' : r.status === '已确认' ? '待审批' : '已驳回'}">${r.status}</span></td>
+        </tr>
+    `).join('');
+}
+
+async function loadEmployees() {
+    const res = await fetch('/api/employees');
+    const employees = await res.json();
+    const select = document.getElementById('otEmpId');
+    select.innerHTML = employees.map(e =>
+        `<option value="${e.id}">${e.name}</option>`
+    ).join('');
+}
+
+function showAddOvertime() {
+    document.getElementById('overtimeModal').style.display = 'flex';
+    loadEmployees();
+    document.getElementById('otDate').value = new Date().toISOString().slice(0,10);
+    previewCompDays();
+    document.getElementById('otResult').innerHTML = '';
+}
+
+function closeModal(id) {
+    document.getElementById(id).style.display = 'none';
+}
+
+function previewCompDays() {
+    const hours = parseFloat(document.getElementById('otHours').value) || 0;
+    const type = document.getElementById('otType').value;
+    let rate = type === '法定假日加班' ? 1.5 : 1;
+    const days = Math.round(hours * rate / 8 * 10) / 10;
+    document.getElementById('compPreview').innerHTML = `预计产生调休假: <strong>${days}</strong> 天`;
+}
+
+async function submitOvertime() {
+    const data = {
+        employee_id: parseInt(document.getElementById('otEmpId').value),
+        overtime_date: document.getElementById('otDate').value,
+        hours: parseFloat(document.getElementById('otHours').value) || 0,
+        overtime_type: document.getElementById('otType').value,
+        description: document.getElementById('otDesc').value
+    };
+
+    if (!data.employee_id || !data.overtime_date || !data.hours) {
+        document.getElementById('otResult').innerHTML = '❌ 请填写完整信息';
+        return;
+    }
+
+    const res = await fetch('/api/overtime/create', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(data)
+    });
+    const result = await res.json();
+    document.getElementById('otResult').innerHTML = result.success ? `✅ ${result.message}` : `❌ ${result.error}`;
+    if (result.success) {
+        loadOvertime();
+        setTimeout(() => closeModal('overtimeModal'), 2000);
+    }
+}
+
+async function autoSettle() {
+    if (!confirm('确认将所有未结算的加班记录一次性结算到调休余额？')) return;
+    const res = await fetch('/api/overtime/auto-settle', { method: 'POST' });
+    const data = await res.json();
+    alert(data.message);
+    loadOvertime();
+}
+
+loadOvertime();
+</script>
+{% endblock %}
