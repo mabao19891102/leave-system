@@ -1,0 +1,204 @@
+{% extends "base.html" %}
+{% block title %}休假管理{% endblock %}
+{% block content %}
+<div class="page-header">
+    <h1>✈️ 休假管理</h1>
+    <p class="text-muted">提交休假申请 · 查看休假记录</p>
+</div>
+
+<div class="toolbar">
+    <button class="btn btn-primary" onclick="showApplyLeave()">📝 提交休假申请</button>
+    <div class="filter-group">
+        <select id="leaveTypeFilter" onchange="loadLeaves()">
+            <option value="">全部假别</option>
+            <option value="年假">年假</option>
+            <option value="调休假">调休假</option>
+            <option value="事假">事假</option>
+            <option value="病假">病假</option>
+        </select>
+        <select id="leaveStatusFilter" onchange="loadLeaves()">
+            <option value="">全部状态</option>
+            <option value="待审批">待审批</option>
+            <option value="已批准">已批准</option>
+            <option value="已驳回">已驳回</option>
+        </select>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-body p-0">
+        <table class="table" id="leaveTable">
+            <thead>
+                <tr><th>员工</th><th>假别</th><th>期间</th><th>天数</th><th>原因</th><th>状态</th><th>审批意见</th><th>提交时间</th></tr>
+            </thead>
+            <tbody id="leaveBody">
+                <tr><td colspan="8" class="text-center">加载中...</td></tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- Apply Leave Modal -->
+<div class="modal" id="applyModal">
+    <div class="modal-content" style="width:520px;">
+        <div class="modal-header">
+            <h2>📝 提交休假申请</h2>
+            <span class="close" onclick="closeModal('applyModal')">&times;</span>
+        </div>
+        <div class="modal-body">
+            <div class="form-group">
+                <label>选择员工</label>
+                <select id="applyEmpId" class="form-select"></select>
+            </div>
+            <div class="form-group">
+                <label>假别</label>
+                <select id="applyType" class="form-select" onchange="checkBalance()">
+                    <option value="年假">年假</option>
+                    <option value="调休假">调休假</option>
+                    <option value="事假">事假</option>
+                    <option value="病假">病假</option>
+                    <option value="其他">其他</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>开始日期</label>
+                <input type="date" id="applyStart" onchange="calcDays()">
+            </div>
+            <div class="form-group">
+                <label>结束日期</label>
+                <input type="date" id="applyEnd" onchange="calcDays()">
+            </div>
+            <div class="form-group">
+                <label>天数</label>
+                <input type="number" id="applyDays" step="0.5" min="0.5" value="1">
+                <small id="balanceHint" class="text-muted"></small>
+            </div>
+            <div class="form-group">
+                <label>事由</label>
+                <textarea id="applyReason" rows="3" placeholder="请简述请假原因..."></textarea>
+            </div>
+            <button class="btn btn-primary" onclick="submitLeave()">提交申请</button>
+            <div id="applyResult" class="mt-2"></div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let currentUserEmpId = {{ session.get('emp_id', 'null') }};
+let employees = [];
+
+async function loadEmployees() {
+    const res = await fetch('/api/employees');
+    employees = await res.json();
+    const select = document.getElementById('applyEmpId');
+    select.innerHTML = employees.map(e =>
+        `<option value="${e.id}">${e.name} (剩余年假:${e.remaining_annual||0}天 调休:${e.remaining_comp||0}天)</option>`
+    ).join('');
+}
+
+async function loadLeaves() {
+    const type = document.getElementById('leaveTypeFilter').value;
+    const status = document.getElementById('leaveStatusFilter').value;
+    const params = new URLSearchParams();
+    if (type) params.set('leave_type', type);
+    if (status) params.set('status', status);
+
+    const res = await fetch(`/api/leaves?${params}`);
+    const leaves = await res.json();
+    const tbody = document.getElementById('leaveBody');
+
+    if (!leaves.length) {
+        tbody.innerHTML = '<tr><td colspan="8" class="text-center">暂无休假记录</td></tr>';
+        return;
+    }
+
+    tbody.innerHTML = leaves.map(l => `
+        <tr>
+            <td><strong>${l.emp_name}</strong></td>
+            <td><span class="tag tag-${l.leave_type}">${l.leave_type}</span></td>
+            <td>${l.start_date} ~ ${l.end_date}</td>
+            <td>${l.days}天</td>
+            <td>${l.reason || '-'}</td>
+            <td><span class="status status-${l.status}">${l.status}</span></td>
+            <td>${l.approver_comment || '-'}</td>
+            <td>${l.created_at || ''}</td>
+        </tr>
+    `).join('');
+}
+
+function showApplyLeave() {
+    document.getElementById('applyModal').style.display = 'flex';
+    document.getElementById('applyResult').innerHTML = '';
+    loadEmployees();
+}
+
+function closeModal(id) {
+    document.getElementById(id).style.display = 'none';
+}
+
+function calcDays() {
+    const start = document.getElementById('applyStart').value;
+    const end = document.getElementById('applyEnd').value;
+    if (start && end) {
+        const diff = (new Date(end) - new Date(start)) / (1000*60*60*24) + 1;
+        document.getElementById('applyDays').value = Math.max(0.5, diff);
+    }
+    checkBalance();
+}
+
+async function checkBalance() {
+    const empId = document.getElementById('applyEmpId').value;
+    const type = document.getElementById('applyType').value;
+    const days = parseFloat(document.getElementById('applyDays').value) || 0;
+    const hint = document.getElementById('balanceHint');
+
+    if (!empId) return;
+    const emp = employees.find(e => e.id == empId);
+    if (!emp) return;
+
+    if (type === '年假') {
+        hint.textContent = `年假余额: ${emp.remaining_annual || 0}天`;
+        if (days > (emp.remaining_annual || 0)) hint.style.color = '#e74c3c';
+        else hint.style.color = '#27ae60';
+    } else if (type === '调休假') {
+        hint.textContent = `调休余额: ${emp.remaining_comp || 0}天`;
+        if (days > (emp.remaining_comp || 0)) hint.style.color = '#e74c3c';
+        else hint.style.color = '#27ae60';
+    } else {
+        hint.textContent = '';
+    }
+}
+
+async function submitLeave() {
+    const data = {
+        employee_id: parseInt(document.getElementById('applyEmpId').value),
+        leave_type: document.getElementById('applyType').value,
+        start_date: document.getElementById('applyStart').value,
+        end_date: document.getElementById('applyEnd').value,
+        days: parseFloat(document.getElementById('applyDays').value) || 1,
+        reason: document.getElementById('applyReason').value
+    };
+
+    if (!data.employee_id || !data.start_date || !data.end_date) {
+        document.getElementById('applyResult').innerHTML = '❌ 请填写完整信息';
+        return;
+    }
+
+    const res = await fetch('/api/leaves/create', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(data)
+    });
+    const result = await res.json();
+    document.getElementById('applyResult').innerHTML = result.success ? `✅ ${result.message}` : `❌ ${result.error}`;
+    if (result.success) {
+        loadLeaves();
+        setTimeout(() => closeModal('applyModal'), 1500);
+    }
+}
+
+loadLeaves();
+</script>
+{% endblock %}
