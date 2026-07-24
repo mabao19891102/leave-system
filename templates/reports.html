@@ -1,0 +1,227 @@
+{% extends "base.html" %}
+{% block title %}统计报表{% endblock %}
+{% block content %}
+<div class="page-header">
+    <h1>📈 统计报表</h1>
+    <p class="text-muted">加班明细 · 调休明细 · 请假明细 · 余额明细</p>
+</div>
+
+<!-- 四个报表模块 -->
+<div class="report-modules">
+    <div class="report-module" onclick="showReport('overtime')">
+        <div class="rm-icon">⏰</div>
+        <div class="rm-info">
+            <div class="rm-title">加班明细</div>
+            <div class="rm-desc">加班开始/结束时间 · 时长 · 天数 · 事由</div>
+        </div>
+        <div class="rm-arrow">→</div>
+    </div>
+    <div class="report-module" onclick="showReport('comp')">
+        <div class="rm-icon">🔄</div>
+        <div class="rm-info">
+            <div class="rm-title">调休明细</div>
+            <div class="rm-desc">调休时间 · 天数 · 事由</div>
+        </div>
+        <div class="rm-arrow">→</div>
+    </div>
+    <div class="report-module" onclick="showReport('leave')">
+        <div class="rm-icon">✈️</div>
+        <div class="rm-info">
+            <div class="rm-title">请假明细</div>
+            <div class="rm-desc">假别 · 时间 · 天数 · 事由</div>
+        </div>
+        <div class="rm-arrow">→</div>
+    </div>
+    <div class="report-module" onclick="showReport('balance')">
+        <div class="rm-icon">📊</div>
+        <div class="rm-info">
+            <div class="rm-title">余额明细表</div>
+            <div class="rm-desc">年假 · 调休 · 余额 · 使用率</div>
+        </div>
+        <div class="rm-arrow">→</div>
+    </div>
+</div>
+
+<!-- 报表详情区域（初始隐藏） -->
+<div id="reportDetailArea" style="display:none;margin-top:16px;">
+    <div class="card">
+        <div class="card-header">
+            <h2 id="detailTitle">报表详情</h2>
+            <button class="btn btn-sm btn-outline" onclick="backToList()" style="color:#8899c0;">← 返回</button>
+        </div>
+        <div class="card-body" id="detailBody"></div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let allEmployees = [];
+let currentType = '';
+
+async function init() {
+    const res = await fetch('/api/employees');
+    allEmployees = await res.json();
+}
+init();
+
+function showReport(type) {
+    currentType = type;
+    const names = {'overtime':'⏰ 加班明细','comp':'🔄 调休明细','leave':'✈️ 请假明细','balance':'📊 余额明细表'};
+    document.getElementById('detailTitle').textContent = names[type] || '报表详情';
+    document.getElementById('reportDetailArea').style.display = 'block';
+
+    const body = document.getElementById('detailBody');
+    if (type === 'balance') {
+        renderBalance(body);
+    } else {
+        renderDetail(type, body);
+    }
+}
+
+function backToList() {
+    document.getElementById('reportDetailArea').style.display = 'none';
+    document.getElementById('detailBody').innerHTML = '';
+}
+
+function renderBalance(container) {
+    container.innerHTML = `
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">
+        <button class="btn btn-sm btn-primary" onclick="exportBalance()">📥 导出Excel</button>
+        <span class="detail-count" id="reportCount">加载中...</span>
+    </div>
+    <div class="table-scroll">
+        <table class="detail-table">
+            <thead><tr><th>姓名</th><th>编号</th><th>年假总额</th><th>已休年假</th><th>剩余年假</th><th>使用率</th><th>调休总额</th><th>已用调休</th><th>剩余调休</th></tr></thead>
+            <tbody id="reportBody"><tr><td colspan="9" class="text-center">加载中...</td></tr></tbody>
+        </table>
+    </div>`;
+    fetch('/api/employees').then(r => r.json()).then(data => {
+        document.getElementById('reportCount').textContent = data.length + '人';
+        document.getElementById('reportBody').innerHTML = data.map(e => {
+            const rate = e.annual_days > 0 ? (e.used_annual / e.annual_days * 100).toFixed(1) : 0;
+            const ra = e.remaining_annual || 0, rc = e.remaining_comp || 0;
+            return '<tr><td><strong>' + e.name + '</strong></td><td>' + e.employee_id + '</td><td>' + (e.annual_days||0) + '</td><td>' + (e.used_annual||0) + '</td><td><span class="tag ' + (ra>0?'tag-green':'tag-gray') + '">' + Math.floor(ra) + '天' + Math.round((ra-Math.floor(ra))*8) + 'h</span></td><td><div class="progress-bar" style="width:80px;margin:0 auto;"><div class="progress-fill" style="width:' + Math.min(rate,100) + '%">' + rate + '%</div></div></td><td>' + (e.comp_days||0) + '</td><td>' + (e.used_comp||0) + '</td><td><span class="tag tag-blue">' + Math.floor(rc) + '天' + Math.round((rc-Math.floor(rc))*8) + 'h</span></td></tr>';
+        }).join('');
+    });
+}
+
+function renderDetail(type, container) {
+    const typeMap = {'overtime':'加班明细','comp':'调休明细','leave':'请假明细'};
+    const apiMap = {'overtime':'overtime','comp':'comp','leave':'leave'};
+    const label = typeMap[type];
+    
+    let tableHtml = `
+    <div class="detail-filter">
+        <input type="date" id="fdFrom">
+        <input type="date" id="fdTo">
+        <select id="fdEmp"><option value="">全部员工</option></select>
+        <button class="btn btn-sm btn-primary" onclick="doQuery()">🔍 查询</button>
+        <button class="btn btn-sm btn-secondary" onclick="doExport()">📥 导出</button>
+        <span class="detail-count" id="fdCount">0条</span>
+    </div>
+    <div class="table-scroll"><table class="detail-table" id="fdTable"><thead>`;
+
+    if (type === 'overtime') {
+        tableHtml += '<tr><th>姓名</th><th>组别</th><th>日期</th><th>时间</th><th>星期</th><th>时长(h)</th><th>天数</th><th>事由</th></tr></thead><tbody id="fdBody"><tr><td colspan="8" class="text-center">点击查询</td></tr></tbody></table></div>';
+    } else if (type === 'comp') {
+        tableHtml += '<tr><th>姓名</th><th>组别</th><th>日期</th><th>时间</th><th>星期</th><th>天数</th><th>事由</th></tr></thead><tbody id="fdBody"><tr><td colspan="7" class="text-center">点击查询</td></tr></tbody></table></div>';
+    } else {
+        tableHtml += '<tr><th>姓名</th><th>组别</th><th>假别</th><th>日期</th><th>时间</th><th>天数</th><th>事由</th></tr></thead><tbody id="fdBody"><tr><td colspan="7" class="text-center">点击查询</td></tr></tbody></table></div>';
+    }
+    container.innerHTML = tableHtml;
+
+    // Populate employee dropdown
+    const sel = document.getElementById('fdEmp');
+    allEmployees.forEach(e => { sel.innerHTML += '<option value="' + e.name + '">' + e.name + '</option>'; });
+    doQuery();
+}
+
+function doQuery() {
+    const typeMap = {'overtime':'overtime','comp':'comp','leave':'leave'};
+    const apiType = typeMap[currentType];
+    const params = new URLSearchParams({type: apiType});
+    const from = document.getElementById('fdFrom').value;
+    const to = document.getElementById('fdTo').value;
+    const emp = document.getElementById('fdEmp').value;
+    if (from) params.set('date_from', from);
+    if (to) params.set('date_to', to);
+    if (emp) params.set('emp_name', emp);
+
+    fetch('/api/reports/details?' + params.toString()).then(r => r.json()).then(data => {
+        document.getElementById('fdCount').textContent = data.length + '条';
+        const tbody = document.getElementById('fdBody');
+        if (!data.length) { tbody.innerHTML = '<tr><td colspan="8" class="text-center">暂无数据</td></tr>'; return; }
+        
+        if (currentType === 'overtime') {
+            tbody.innerHTML = data.map(a => {
+                const timeRange = a.start_time && a.end_time ? a.start_time + '~' + a.end_time : '-';
+                return '<tr><td><strong>' + a.emp_name + '</strong></td><td>药事管理组</td><td>' + (a.start_date_only||'') + '</td><td>' + timeRange + '</td><td>' + a.weekday + '</td><td>' + (a.overtime_hours||'') + '</td><td>' + (a.days||'') + '</td><td><small>' + (a.reason||'-') + '</small></td></tr>';
+            }).join('');
+        } else if (currentType === 'comp') {
+            tbody.innerHTML = data.map(a => {
+                const timeRange = a.start_time && a.end_time ? a.start_time + '~' + a.end_time : '-';
+                return '<tr><td><strong>' + a.emp_name + '</strong></td><td>药事管理组</td><td>' + (a.start_date_only||'') + '</td><td>' + timeRange + '</td><td>' + a.weekday + '</td><td>' + (a.days||'') + '</td><td><small>' + (a.reason||'-') + '</small></td></tr>';
+            }).join('');
+        } else {
+            tbody.innerHTML = data.map(a => {
+                const timeRange = a.start_time && a.end_time ? a.start_time + '~' + a.end_time : '-';
+                return '<tr><td><strong>' + a.emp_name + '</strong></td><td>药事管理组</td><td>' + (a.leave_type||'-') + '</td><td>' + (a.start_date_only||'') + '</td><td>' + timeRange + '</td><td>' + (a.days||'') + '</td><td><small>' + (a.reason||'-') + '</small></td></tr>';
+            }).join('');
+        }
+    });
+}
+
+function doExport() {
+    const typeMap = {'overtime':'overtime','comp':'comp','leave':'leave'};
+    const apiType = typeMap[currentType];
+    const params = new URLSearchParams({type: apiType});
+    const from = document.getElementById('fdFrom').value;
+    const to = document.getElementById('fdTo').value;
+    const emp = document.getElementById('fdEmp').value;
+    if (from) params.set('date_from', from);
+    if (to) params.set('date_to', to);
+    if (emp) params.set('emp_name', emp);
+
+    fetch('/api/reports/details?' + params.toString()).then(r => r.json()).then(data => {
+        if (!data.length) { alert('暂无数据可导出'); return; }
+        const labels = {'overtime':'加班明细','comp':'调休明细','leave':'请假明细'};
+        let headers, rows;
+        if (currentType === 'overtime') {
+            headers = ['姓名','组别','开始时间','结束时间','星期','加班时长(h)','天数','事由'];
+            rows = data.map(a => [a.emp_name,'药事管理组',a.start_date_only+' '+a.start_time,(a.end_date||'').slice(11,16),a.weekday,a.overtime_hours||'',a.days||'',a.reason||'']);
+        } else if (currentType === 'comp') {
+            headers = ['姓名','组别','开始时间','结束时间','星期','天数','事由'];
+            rows = data.map(a => [a.emp_name,'药事管理组',a.start_date_only+' '+a.start_time,(a.end_date||'').slice(11,16),a.weekday,a.days||'',a.reason||'']);
+        } else {
+            headers = ['姓名','组别','假别','开始时间','结束时间','天数','事由'];
+            rows = data.map(a => [a.emp_name,'药事管理组',a.leave_type||'-',a.start_date_only+' '+a.start_time,(a.end_date||'').slice(11,16),a.days||'',a.reason||'']);
+        }
+        let csv = '\uFEFF' + headers.join(',') + '\n';
+        rows.forEach(r => csv += r.join(',') + '\n');
+        const blob = new Blob([csv], {type:'text/csv;charset=utf-8;'});
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url; a.download = labels[currentType] + '_' + new Date().toISOString().slice(0,10) + '.csv';
+        a.click(); URL.revokeObjectURL(url);
+    });
+}
+
+function exportBalance() {
+    fetch('/api/employees').then(r => r.json()).then(data => {
+        const headers = ['姓名','编号','年假总额','已休年假','剩余年假(天)','剩余年假(h)','使用率','调休总额','已用调休','剩余调休(天)','剩余调休(h)'];
+        let csv = '\uFEFF' + headers.join(',') + '\n';
+        data.forEach(e => {
+            const rate = e.annual_days > 0 ? (e.used_annual / e.annual_days * 100).toFixed(1) + '%' : '0%';
+            const ra = e.remaining_annual || 0, rc = e.remaining_comp || 0;
+            csv += [e.name, e.employee_id, e.annual_days||0, e.used_annual||0, Math.floor(ra), Math.round((ra-Math.floor(ra))*8), rate, e.comp_days||0, e.used_comp||0, Math.floor(rc), Math.round((rc-Math.floor(rc))*8)].join(',') + '\n';
+        });
+        const blob = new Blob([csv], {type:'text/csv;charset=utf-8;'});
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url; a.download = '余额明细表_' + new Date().toISOString().slice(0,10) + '.csv';
+        a.click(); URL.revokeObjectURL(url);
+    });
+}
+</script>
+{% endblock %}
