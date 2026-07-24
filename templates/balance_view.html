@@ -1,0 +1,86 @@
+{% extends "base.html" %}
+{% block title %}余额查询{% endblock %}
+{% block content %}
+<div class="page-header">
+    <h1>📊 余额明细查询</h1>
+    <p class="text-muted">查看所有员工假期余额</p>
+</div>
+
+<div class="toolbar">
+    <button class="btn btn-primary" onclick="exportBalance()">📥 导出Excel</button>
+</div>
+
+<div class="card">
+    <div class="card-header">
+        <h2>👥 员工假期余额</h2>
+        <span class="chart-badge" id="totalCount">0人</span>
+    </div>
+    <div class="card-body p-0">
+        <div class="table-scroll">
+            <table class="table report-table" id="balanceTable">
+                <thead>
+                    <tr>
+                        <th style="width:68px;">姓名</th>
+                        <th style="width:60px;">编号</th>
+                        <th style="width:50px;">学历</th>
+                        <th style="width:50px;">岗位</th>
+                        <th style="width:52px;">年假总额</th>
+                        <th style="width:52px;">已休</th>
+                        <th style="width:72px;">剩余年假</th>
+                        <th style="width:52px;">调休</th>
+                        <th style="width:52px;">已用</th>
+                        <th style="width:72px;">剩余调休</th>
+                    </tr>
+                </thead>
+                <tbody id="balanceBody">
+                    <tr><td colspan="10" class="text-center">加载中...</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+async function load() {
+    const res = await fetch('/api/balance-data');
+    const data = await res.json();
+    document.getElementById('totalCount').textContent = data.length + '人';
+    const tbody = document.getElementById('balanceBody');
+    tbody.innerHTML = data.map(e => `<tr>
+        <td><strong>${e.name}</strong></td>
+        <td>${e.employee_id}</td>
+        <td>${e.education || '-'}</td>
+        <td>${e.position_status || '-'}</td>
+        <td>${e.annual_days || 0}</td>
+        <td>${e.used_annual || 0}</td>
+        <td><span class="tag tag-green">${e.annual_days_display}天 ${e.annual_hours_display}h</span></td>
+        <td>${e.comp_days || 0}</td>
+        <td>${e.used_comp || 0}</td>
+        <td><span class="tag tag-blue">${e.comp_days_display}天 ${e.comp_hours_display}h</span></td>
+    </tr>`).join('');
+}
+
+function exportBalance() {
+    fetch('/api/balance-data').then(r => r.json()).then(data => {
+        const headers = ['姓名','编号','学历','岗位','年假总额','已休年假','剩余年假(天)','剩余年假(小时)','调休总额','已用调休','剩余调休(天)','剩余调休(小时)'];
+        let csv = '\uFEFF' + headers.join(',') + '\n';
+        data.forEach(e => {
+            csv += [e.name, e.employee_id, e.education||'', e.position_status||'', e.annual_days||0, e.used_annual||0,
+                    e.annual_days_display, e.annual_hours_display,
+                    e.comp_days||0, e.used_comp||0, e.comp_days_display, e.comp_hours_display].join(',') + '\n';
+        });
+        const blob = new Blob([csv], {type:'text/csv;charset=utf-8;'});
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `余额明细表_${new Date().toISOString().slice(0,10)}.csv`;
+        a.click();
+        URL.revokeObjectURL(url);
+    });
+}
+
+load();
+</script>
+{% endblock %}
