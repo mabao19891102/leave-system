@@ -1,0 +1,298 @@
+{% extends "base.html" %}
+{% block title %}首页{% endblock %}
+{% block content %}
+<div class="dash-bg">
+<div class="dash-bg-grid"></div>
+<div class="dash-glow dash-glow-1"></div>
+<div class="dash-glow dash-glow-2"></div>
+
+<div class="dash-content">
+    <div class="dash-hero">
+        <h1>西安交大一附院药事管理组</h1>
+        <div class="hero-sub">假 期 管 理 系 统</div>
+        <div class="hero-line"></div>
+    </div>
+
+    <div class="dash-header">
+        <div class="dash-title">
+            <p class="dash-subtitle">{{ '部门负责人 · 马文兵' if is_admin else user }}，欢迎回来</p>
+        </div>
+        <div class="dash-clock" id="dashClock"></div>
+    </div>
+
+    <div class="kpi-grid">
+        <div class="kpi-card kpi-blue" onclick="location.href='/employees'">
+            <div class="kpi-icon">👥</div>
+            <div class="kpi-body">
+                <div class="kpi-value">{{ stats.emp_count }}</div>
+                <div class="kpi-label">在职员工</div>
+            </div>
+        </div>
+        <div class="kpi-card kpi-orange" onclick="location.href='/approvals'">
+            <div class="kpi-icon">⏳</div>
+            <div class="kpi-body">
+                <div class="kpi-value" id="kpiPending">{{ stats.pending_count }}</div>
+                <div class="kpi-label">待审批</div>
+            </div>
+        </div>
+        <div class="kpi-card kpi-green">
+            <div class="kpi-icon">✅</div>
+            <div class="kpi-body">
+                <div class="kpi-value">{{ stats.approved_count }}</div>
+                <div class="kpi-label">已通过</div>
+            </div>
+        </div>
+        <div class="kpi-card kpi-purple">
+            <div class="kpi-icon">⏰</div>
+            <div class="kpi-body">
+                <div class="kpi-value">{{ "%.0f"|format(stats.total_overtime) }}</div>
+                <div class="kpi-label">加班小时</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="chart-grid" style="margin-bottom:8px;">
+        <div class="chart-card">
+            <div class="chart-header"><h3>🎓 学历分布</h3><span class="chart-badge" id="eduTotal">0人</span></div>
+            <div class="chart-body" id="eduChart"><div class="chart-loading">加载中...</div></div>
+        </div>
+        <div class="chart-card">
+            <div class="chart-header"><h3>📅 工龄分布</h3><span class="chart-badge" id="svcTotal">0人</span></div>
+            <div class="chart-body" id="svcChart"><div class="chart-loading">加载中...</div></div>
+        </div>
+        <div class="chart-card">
+            <div class="chart-header"><h3>📆 入组时间</h3><span class="chart-badge" id="joinTotal">0人</span></div>
+            <div class="chart-body" id="joinChart"><div class="chart-loading">加载中...</div></div>
+        </div>
+    </div>
+
+    <div class="chart-grid" style="grid-template-columns:1fr 1fr;margin-bottom:8px;">
+        <div class="chart-card chart-scroll-card">
+            <div class="chart-header">
+                <h3>🏖️ 年假使用情况</h3>
+                <span style="font-size:10px;color:#8899c0;"><span style="color:#ff4757;">■</span>已休 <span style="color:#60a5fa;">■</span>剩余</span>
+            </div>
+            <div class="chart-body chart-scroll-body" id="annualChartWrap" style="max-height:260px;">
+                <div id="annualChart"><div class="chart-loading">加载中...</div></div>
+            </div>
+        </div>
+        <div class="chart-card chart-scroll-card">
+            <div class="chart-header">
+                <h3>🔄 调休假使用情况</h3>
+                <span style="font-size:10px;color:#8899c0;"><span style="color:#ff4757;">■</span>已用 <span style="color:#60a5fa;">■</span>剩余</span>
+            </div>
+            <div class="chart-body chart-scroll-body" id="compChartWrap" style="max-height:260px;">
+                <div id="compChart"><div class="chart-loading">加载中...</div></div>
+            </div>
+        </div>
+    </div>
+
+    <div style="display:flex;gap:8px;margin-bottom:0;">
+        <div class="card glass-card" style="flex:1;">
+            <div class="card-header"><h2>📌 今日在休</h2></div>
+            <div class="card-body" style="padding:10px 14px;">
+                {% if on_leave %}
+                <div style="display:flex;flex-wrap:wrap;gap:6px;">
+                {% for ol in on_leave %}
+                    <span style="font-size:13px;color:#c0cce0;background:rgba(255,255,255,0.04);padding:4px 12px;border-radius:6px;">{{ ol.name }} · <span class="tag tag-{{ ol.leave_type or '其他' }}">{{ ol.leave_type or '其他' }}</span> {{ ol.start_date[11:16] }}~{{ ol.end_date[11:16] }}</span>
+                {% endfor %}
+                </div>
+                {% else %}
+                <div class="empty-state" style="padding:8px 0;">🎉 今日无人请假</div>
+                {% endif %}
+            </div>
+        </div>
+        <div class="card glass-card" style="flex:1;overflow:hidden;">
+            <div class="card-header"><h2>🕐 最近申请</h2></div>
+            <div class="card-body p-0" style="max-height:100px;overflow:hidden;">
+                <div class="scroll-wrap" id="scrollWrap">
+                    <table class="table mini-table" id="scrollContent">
+                        <thead><tr><th>员工</th><th>类型</th><th>状态</th></tr></thead>
+                        <tbody id="scrollBody">
+                        {% for a in recent_apps %}
+                        <tr><td>{{ a.emp_name }}</td><td><span class="tag tag-{{ a.app_type }}">{{ a.app_type }}</span></td><td><span class="status status-{{ a.status }}">{{ a.status }}</span></td></tr>
+                        {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+</div>
+
+<div class="modal" id="drillModal">
+    <div class="modal-content" style="width:500px;">
+        <div class="modal-header"><h2 id="drillTitle">明细</h2><span class="close" onclick="closeModal('drillModal')">&times;</span></div>
+        <div class="modal-body" id="drillBody"><div class="text-center p-4">加载中...</div></div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function updateClock() {
+    const now = new Date();
+    document.getElementById('dashClock').textContent =
+        now.toLocaleDateString('zh-CN', {year:'numeric',month:'long',day:'numeric',weekday:'long'}) +
+        ' ' + now.toLocaleTimeString('zh-CN', {hour:'2-digit',minute:'2-digit',second:'2-digit'});
+}
+updateClock();
+setInterval(updateClock, 1000);
+
+(function() {
+    const wrap = document.getElementById('scrollWrap');
+    const tbody = document.getElementById('scrollBody');
+    if (!tbody || !wrap || !tbody.children.length) return;
+    const rows = tbody.querySelectorAll('tr');
+    if (rows.length <= 3) return;
+    const rowH = 32, totalH = rows.length * rowH;
+    wrap.style.overflow = 'hidden'; wrap.style.height = Math.min(totalH, rowH * 3) + 'px';
+    let pos = 0;
+    const clone = tbody.cloneNode(true); tbody.parentNode.appendChild(clone);
+    setInterval(() => { pos += 0.5; if (pos >= totalH) { pos = 0; wrap.scrollTop = 0; } else { wrap.scrollTop = pos; } }, 30);
+})();
+
+let allEmployees = [];
+
+async function loadData() {
+    const [r1, r2] = await Promise.all([fetch('/api/dashboard/stats'), fetch('/api/employees')]);
+    const stats = await r1.json(); allEmployees = await r2.json();
+    renderBar('eduChart', stats.edu);
+    renderBar('svcChart', stats.service);
+    renderJoin('joinChart', stats.join);
+    renderOneChart('annualChart', allEmployees.map(e => e.name), allEmployees.map(e => e.used_annual||0), allEmployees.map(e => (e.annual_days||0)-(e.used_annual||0)));
+    renderOneChart('compChart', allEmployees.map(e => e.name), allEmployees.map(e => e.used_comp||0), allEmployees.map(e => (e.comp_days||0)-(e.used_comp||0)));
+}
+
+function renderOneChart(containerId, names, used, remain) {
+    const container = document.getElementById(containerId);
+    if (!container) return;
+    const maxVal = Math.max(...used.map((v,i) => v + (remain[i]||0)), 1);
+    const barH = 22, gap = 10;
+    const h = names.length * (barH + gap) + 4;
+    let svg = '<svg width="100%" height="' + h + '" style="overflow:visible;">';
+    for (let i = 0; i < names.length; i++) {
+        const y = 2 + i * (barH + gap);
+        const u = used[i]||0, r = remain[i]||0;
+        const wU = (u/maxVal)*240, wR = (r/maxVal)*240;
+        const chartType = containerId === 'annualChart' ? 'annual' : 'comp';
+        svg += '<rect x="58" y="' + y + '" width="240" height="' + barH + '" rx="4" fill="rgba(255,255,255,0.05)"/>';
+        svg += '<text x="54" y="' + (y+barH/2+5) + '" font-size="15" fill="#c0cce0" font-weight="600" text-anchor="end" style="cursor:pointer;" onclick="drillEmployee(\'' + names[i] + '\',\'' + chartType + '\')">' + names[i] + '</text>';
+        if (wU > 0) svg += '<rect x="58" y="' + y + '" width="' + Math.max(wU,4) + '" height="' + barH + '" rx="4" fill="#ff4757" opacity="0.9" style="cursor:pointer;" onclick="drillEmployee(\'' + names[i] + '\',\'' + chartType + '\')"/>';
+        if (wR > 0) svg += '<rect x="' + (58+wU) + '" y="' + y + '" width="' + Math.max(wR,4) + '" height="' + barH + '" rx="4" fill="#60a5fa" opacity="0.85" style="cursor:pointer;" onclick="drillEmployee(\'' + names[i] + '\',\'' + chartType + '\')"/>';
+        if (u > 0) svg += '<text x="62" y="' + (y+barH/2+5) + '" font-size="13" fill="white" font-weight="700">' + u + '</text>';
+        if (r > 0) svg += '<text x="' + (60+Math.max(wU,3)+4) + '" y="' + (y+barH/2+5) + '" font-size="13" fill="#60a5fa" font-weight="700">' + r + '</text>';
+    }
+    svg += '</svg>';
+    container.innerHTML = svg;
+    const wrap = document.getElementById(containerId + 'Wrap');
+    if (names.length > 6 && wrap) {
+        wrap.style.overflow = 'hidden';
+        let pos = 0, maxScroll = h - 260;
+        const clone = container.cloneNode(true);
+        container.parentNode.appendChild(clone);
+        setInterval(function() { pos += 0.5; if (pos >= maxScroll) { pos = 0; wrap.scrollTop = 0; } else { wrap.scrollTop = pos; } }, 30);
+    }
+}
+
+function renderBar(containerId, items) {
+    const container = document.getElementById(containerId);
+    if (!container) return;
+    const total = items.reduce(function(s,i) { return s + i.count; }, 0);
+    if (!total) { container.innerHTML = '<div class="chart-empty">暂无</div>'; return; }
+    const colors = ['#60a5fa','#a78bfa','#f472b6','#34d399','#fbbf24'];
+    let html = '<div style="display:flex;flex-direction:column;gap:10px;">';
+    items.forEach(function(item, i) {
+        const pct = (item.count / total * 100).toFixed(0);
+        html += '<div style="display:flex;align-items:center;gap:10px;font-size:14px;padding:4px 0;cursor:pointer;border-radius:6px;" onclick="drillDist(\'' + containerId + '\',\'' + item.label + '\')" onmouseover="this.style.background=\'rgba(255,255,255,0.05)\'" onmouseout="this.style.background=\'\'">' +
+            '<span style="color:#c0cce0;min-width:44px;font-weight:600;">' + item.label + '</span>' +
+            '<div style="flex:1;height:24px;background:rgba(255,255,255,0.06);border-radius:12px;overflow:hidden;">' +
+            '<div style="height:100%;width:' + pct + '%;background:' + colors[i%colors.length] + ';border-radius:12px;display:flex;align-items:center;padding-left:10px;">' +
+            '<span style="font-size:12px;color:white;font-weight:700;">' + item.count + '</span></div></div>' +
+            '<span style="color:#8899c0;min-width:36px;text-align:right;font-weight:600;">' + pct + '%</span></div>';
+    });
+    html += '</div>';
+    container.innerHTML = html;
+}
+
+function renderJoin(containerId, items) {
+    const container = document.getElementById(containerId);
+    if (!container) return;
+    const maxVal = Math.max.apply(null, items.map(function(i) { return i.count; }));
+    if (maxVal <= 0) { container.innerHTML = '<div class="chart-empty">暂无</div>'; return; }
+    let html = '<div style="display:flex;flex-direction:column;gap:10px;">';
+    items.forEach(function(item) {
+        const pct = (item.count / maxVal * 100).toFixed(0);
+        html += '<div style="display:flex;align-items:center;gap:10px;font-size:14px;padding:4px 0;cursor:pointer;border-radius:6px;" onclick="drillJoin(\'' + item.month + '\')" onmouseover="this.style.background=\'rgba(255,255,255,0.05)\'" onmouseout="this.style.background=\'\'">' +
+            '<span style="color:#c0cce0;min-width:60px;font-weight:600;">' + item.month + '</span>' +
+            '<div style="flex:1;height:24px;background:rgba(255,255,255,0.06);border-radius:12px;overflow:hidden;">' +
+            '<div style="height:100%;width:' + Math.max(pct,6) + '%;background:linear-gradient(90deg,#60a5fa,#a78bfa);border-radius:12px;display:flex;align-items:center;padding-left:10px;">' +
+            '<span style="font-size:12px;color:white;font-weight:700;">' + item.count + '</span></div></div></div>';
+    });
+    html += '</div>';
+    container.innerHTML = html;
+}
+
+function drillDist(chartId, label) {
+    let matched = [];
+    const chartNames = {'eduChart':'🎓 学历','svcChart':'📅 工龄'};
+    const title = (chartNames[chartId] || '') + ' - ' + label;
+    if (chartId === 'eduChart') {
+        matched = allEmployees.filter(function(e) { return (e.education || '未设置') === label; });
+    } else if (chartId === 'svcChart') {
+        const now = new Date();
+        matched = allEmployees.filter(function(e) {
+            if (!e.hire_date) return false;
+            const yrs = (now - new Date(e.hire_date)) / (365.25 * 24 * 60 * 60 * 1000);
+            if (label === '1年以下') return yrs < 1;
+            if (label === '1-3年') return yrs >= 1 && yrs < 3;
+            if (label === '3-5年') return yrs >= 3 && yrs < 5;
+            if (label === '5-10年') return yrs >= 5 && yrs < 10;
+            return yrs >= 10;
+        });
+    }
+    showDrillModal(title, matched);
+}
+
+function drillJoin(month) {
+    const matched = allEmployees.filter(function(e) { return (e.join_group_date||'').startsWith(month); });
+    showDrillModal('📆 入组 - ' + month, matched);
+}
+
+function drillEmployee(name, type) {
+    const emp = allEmployees.find(function(e) { return e.name === name; });
+    if (!emp) return;
+    const title = (type === 'annual' ? '🏖️ 年假 - ' : '🔄 调休 - ') + name;
+    showDrillModal(title, [emp], type);
+}
+
+function showDrillModal(title, employees, type) {
+    document.getElementById('drillTitle').textContent = title + ' (' + employees.length + '人)';
+    let html = '<table class="table mini-table"><thead><tr><th>姓名</th><th>编号</th><th>学历</th>';
+    if (type === 'annual') html += '<th>年假总额</th><th>已休</th><th>剩余</th>';
+    else if (type === 'comp') html += '<th>调休总额</th><th>已用</th><th>剩余</th>';
+    else html += '<th>入职</th><th>岗位</th>';
+    html += '</tr></thead><tbody>';
+    employees.forEach(function(e) {
+        html += '<tr><td>' + e.name + '</td><td>' + e.employee_id + '</td><td>' + (e.education || '-') + '</td>';
+        if (type === 'annual') {
+            const ra = e.remaining_annual || 0;
+            html += '<td>' + (e.annual_days||0) + '</td><td>' + (e.used_annual||0) + '</td><td>' + Math.floor(ra) + '天' + Math.round((ra-Math.floor(ra))*8) + 'h</td>';
+        } else if (type === 'comp') {
+            const rc = e.remaining_comp || 0;
+            html += '<td>' + (e.comp_days||0) + '</td><td>' + (e.used_comp||0) + '</td><td>' + Math.floor(rc) + '天' + Math.round((rc-Math.floor(rc))*8) + 'h</td>';
+        } else {
+            html += '<td>' + (e.hire_date||'-') + '</td><td>' + (e.position_status||'-') + '</td>';
+        }
+        html += '</tr>';
+    });
+    html += '</tbody></table>';
+    document.getElementById('drillBody').innerHTML = html;
+    document.getElementById('drillModal').style.display = 'flex';
+}
+
+function closeModal(id) { document.getElementById(id).style.display = 'none'; }
+loadData();
+</script>
+{% endblock %}
