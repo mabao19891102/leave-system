@@ -1,0 +1,136 @@
+{% extends "base.html" %}
+{% block title %}我的假期{% endblock %}
+{% block content %}
+<div class="page-header">
+    <h1>👤 我的假期</h1>
+    <p class="text-muted">查看个人假期余额与申请记录</p>
+</div>
+
+<!-- Balance Cards -->
+<div class="balance-cards" id="myBalance">
+    <div class="text-center p-4">加载中...</div>
+</div>
+
+<div class="grid-2col mb-3">
+    <div class="card">
+        <div class="card-header"><h2>📋 我的申请</h2></div>
+        <div class="card-body p-0">
+            <div class="filter-bar" style="padding:8px 12px;border-bottom:1px solid rgba(255,255,255,0.04);">
+                <div class="filter-item">
+                    <label>开始日期</label>
+                    <input type="date" id="filterFrom" style="font-size:12px;padding:4px 8px;border:1px solid rgba(255,255,255,0.1);border-radius:6px;background:rgba(255,255,255,0.04);color:#c0cce0;">
+                </div>
+                <div class="filter-item">
+                    <label>结束日期</label>
+                    <input type="date" id="filterTo" style="font-size:12px;padding:4px 8px;border:1px solid rgba(255,255,255,0.1);border-radius:6px;background:rgba(255,255,255,0.04);color:#c0cce0;">
+                </div>
+                <button class="btn btn-sm btn-primary" onclick="loadMyApps()" style="margin-top:16px;">🔍 查询</button>
+                <span class="filter-count" id="myAppCount"></span>
+            </div>
+            <div id="myApps" style="min-height:100px;">
+                <div class="text-center p-4">加载中...</div>
+            </div>
+        </div>
+    </div>
+    <div class="card">
+        <div class="card-header"><h2>ℹ️ 使用说明</h2></div>
+        <div class="card-body">
+            <div class="rule-list">
+                <div class="rule-item">📝 <strong>请假申请</strong>：选择年假或调休假，填写日期 → 马文兵审批</div>
+                <div class="rule-item">⏰ <strong>加班申请</strong>：记录加班时间 → 马文兵审批 → 自动获得调休假</div>
+                <div class="rule-item">🔄 <strong>调休补假</strong>：只针对周六及节假日值班假 → 马文兵审批</div>
+                <div class="rule-item mt-2" style="font-size:12px;color:#8899c0;padding:8px 12px;background:rgba(255,255,255,0.03);border-radius:6px;">
+                    💡 调休假原则上需要值班下周内休完
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+async function loadMyInfo() {
+    const res = await fetch('/api/employees/my-info');
+    const emp = await res.json();
+    
+    const ra = emp.remaining_annual || 0;
+    const rc = emp.remaining_comp || 0;
+    const raD = Math.floor(ra), raH = Math.round((ra - raD) * 8);
+    const rcD = Math.floor(rc), rcH = Math.round((rc - rcD) * 8);
+    
+    document.getElementById('myBalance').innerHTML = `
+    <div class="balance-cards-grid">
+        <div class="balance-card balance-card-blue">
+            <div class="bc-icon">🏖️</div>
+            <div class="bc-body">
+                <div class="bc-label">年假总额</div>
+                <div class="bc-value">${emp.annual_days ?? 0}<span class="bc-unit">天</span></div>
+                <div class="bc-sub">已用 ${emp.used_annual ?? 0}天</div>
+            </div>
+        </div>
+        <div class="balance-card balance-card-green">
+            <div class="bc-icon">✅</div>
+            <div class="bc-body">
+                <div class="bc-label">剩余年假</div>
+                <div class="bc-value">${raD}<span class="bc-unit">天</span> <span class="bc-small">${raH}小时</span></div>
+                <div class="bc-sub">${emp.annual_days > 0 ? ((ra / emp.annual_days * 100).toFixed(0) + '%') : '-'}</div>
+            </div>
+        </div>
+        <div class="balance-card balance-card-purple">
+            <div class="bc-icon">🔄</div>
+            <div class="bc-body">
+                <div class="bc-label">调休总额</div>
+                <div class="bc-value">${emp.comp_days ?? 0}<span class="bc-unit">天</span></div>
+                <div class="bc-sub">已用 ${emp.used_comp ?? 0}天</div>
+            </div>
+        </div>
+        <div class="balance-card balance-card-orange">
+            <div class="bc-icon">⏳</div>
+            <div class="bc-body">
+                <div class="bc-label">剩余调休</div>
+                <div class="bc-value">${rcD}<span class="bc-unit">天</span> <span class="bc-small">${rcH}小时</span></div>
+                <div class="bc-sub">${emp.comp_days > 0 ? ((rc / emp.comp_days * 100).toFixed(0) + '%') : '-'}</div>
+            </div>
+        </div>
+    </div>`;
+}
+
+async function loadMyApps() {
+    const from = document.getElementById('filterFrom').value;
+    const to = document.getElementById('filterTo').value;
+    const params = new URLSearchParams();
+    if (from) params.set('date_from', from);
+    if (to) params.set('date_to', to);
+    
+    const res = await fetch('/api/applications?' + params.toString());
+    const apps = await res.json();
+    const container = document.getElementById('myApps');
+    document.getElementById('myAppCount').textContent = `${apps.length}条`;
+    
+    if (!apps.length) {
+        container.innerHTML = '<div class="empty-state">暂无申请记录，去"申请中心"提交吧</div>';
+        return;
+    }
+    let html = '<table class="table" style="font-size:13px;"><thead><tr><th>类型</th><th>详情</th><th>状态</th><th>提交时间</th></tr></thead><tbody>';
+    apps.forEach(a => {
+        let detail = '';
+        if (a.app_type == '请假') detail = `${a.leave_type} ${a.days}天`;
+        else if (a.app_type == '加班') detail = `${a.overtime_date} ${a.overtime_hours}小时 → ${a.days}天调休`;
+        else if (a.app_type == '调休补假') detail = `${a.days}天`;
+        const time = (a.created_at || '').slice(0, 16);
+        html += `<tr>
+            <td><span class="tag tag-${a.app_type}">${a.app_type}</span></td>
+            <td style="font-size:12px;color:#a0b4d0;">${detail}</td>
+            <td><span class="status status-${a.status}">${a.status}</span></td>
+            <td style="font-size:11px;color:#6679a0;">${time}</td>
+        </tr>`;
+    });
+    html += '</tbody></table>';
+    container.innerHTML = html;
+}
+
+loadMyInfo();
+loadMyApps();
+</script>
+{% endblock %}
