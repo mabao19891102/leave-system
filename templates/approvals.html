@@ -1,0 +1,288 @@
+{% extends "base.html" %}
+{% block title %}审批管理{% endblock %}
+{% block content %}
+<div class="page-header">
+    <h1>✅ 审批管理</h1>
+    <p class="text-muted">部门负责人马文兵 · 审批所有申请</p>
+</div>
+
+<div class="tab-bar">
+    <button class="tab-btn active" onclick="switchTab('pending', this)" id="tabPending">
+        ⏳ 待审批 <span class="badge" id="pendingCount">0</span>
+    </button>
+    <button class="tab-btn" onclick="switchTab('all', this)">📋 全部记录</button>
+</div>
+
+<div id="pendingSection">
+    <div class="card mt-3" id="pendingList">
+        <div class="text-center p-4">加载中...</div>
+    </div>
+</div>
+
+<div id="allSection" style="display:none;">
+    <div class="card mt-3">
+        <div class="filter-bar" style="padding:10px 14px;border-bottom:1px solid rgba(255,255,255,0.04);">
+            <div class="filter-item">
+                <label>开始日期</label>
+                <input type="date" id="filterFrom" style="font-size:12px;padding:4px 8px;border:1px solid rgba(255,255,255,0.1);border-radius:6px;background:rgba(255,255,255,0.04);color:#c0cce0;">
+            </div>
+            <div class="filter-item">
+                <label>结束日期</label>
+                <input type="date" id="filterTo" style="font-size:12px;padding:4px 8px;border:1px solid rgba(255,255,255,0.1);border-radius:6px;background:rgba(255,255,255,0.04);color:#c0cce0;">
+            </div>
+            <div class="filter-item">
+                <label>员工</label>
+                <select id="filterEmp" style="font-size:12px;padding:4px 8px;border:1px solid rgba(255,255,255,0.1);border-radius:6px;background:rgba(255,255,255,0.04);color:#c0cce0;">
+                    <option value="">全部</option>
+                </select>
+            </div>
+            <button class="btn btn-sm btn-primary" onclick="renderAll()" style="margin-top:16px;">🔍 查询</button>
+            <button class="btn btn-sm btn-secondary" onclick="exportApprovals()" style="margin-top:16px;">📥 导出</button>
+            <span class="filter-count" id="allCount"></span>
+        </div>
+        <div class="card-body p-0" id="allList">
+            <div class="text-center p-4">加载中...</div>
+        </div>
+    </div>
+</div>
+
+<!-- Approve Detail Modal -->
+<div class="modal" id="approveModal">
+    <div class="modal-content" style="width:500px;">
+        <div class="modal-header">
+            <h2 id="approveTitle">审批详情</h2>
+            <span class="close" onclick="closeModal('approveModal')">&times;</span>
+        </div>
+        <div class="modal-body">
+            <div id="approveDetail" class="detail-section"></div>
+            <div class="form-group mt-3">
+                <label>审批意见（可选）</label>
+                <textarea id="approveComment" rows="2" placeholder="请输入审批意见..."></textarea>
+            </div>
+            <div class="btn-group">
+                <button class="btn btn-success" onclick="doApprove('approve')">✅ 批准</button>
+                <button class="btn btn-danger" onclick="doApprove('reject')">❌ 驳回</button>
+            </div>
+            <div id="approveResult" class="mt-2"></div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let allApps = [];
+let currentApproveId = null;
+
+async function loadApprovals() {
+    const res = await fetch('/api/applications');
+    allApps = await res.json();
+
+    const pending = allApps.filter(a => a.status === '待审批');
+    document.getElementById('pendingCount').textContent = pending.length;
+
+    renderPending(pending);
+    renderAll();
+    // Populate employee dropdown
+    const empSelect = document.getElementById('filterEmp');
+    if (empSelect) {
+        const names = [...new Set(allApps.map(a => a.emp_name))].sort();
+        empSelect.innerHTML = '<option value="">全部</option>' + names.map(n => '<option value="' + n + '">' + n + '</option>').join('');
+    }
+}
+
+function renderPending(pending) {
+    const container = document.getElementById('pendingList');
+    if (!pending.length) {
+        container.innerHTML = '<div class="empty-state p-4">🎉 暂无待审批申请</div>';
+        return;
+    }
+    container.innerHTML = pending.map(a => createCard(a)).join('');
+}
+
+function renderAll() {
+    const container = document.getElementById('allList');
+    const from = document.getElementById('filterFrom').value;
+    const to = document.getElementById('filterTo').value;
+    const empFilter = document.getElementById('filterEmp').value;
+
+    let filtered = allApps;
+    if (from) filtered = filtered.filter(a => (a.created_at||'').slice(0,10) >= from);
+    if (to) filtered = filtered.filter(a => (a.created_at||'').slice(0,10) <= to);
+    if (empFilter) filtered = filtered.filter(a => a.emp_name === empFilter);
+
+    document.getElementById('allCount').textContent = filtered.length + '条';
+
+    if (!filtered.length) {
+        container.innerHTML = '<div class="text-center p-4">暂无记录</div>';
+        return;
+    }
+    let html = `<table class="table" style="font-size:13px;"><thead><tr>
+        <th>员工</th><th>类型</th><th>详情</th><th>状态</th><th>审批意见</th><th>时间</th><th>操作</th>
+    </tr></thead><tbody>`;
+    filtered.forEach(a => {
+        const sd = (a.start_date || '').substring(0, 10);
+        const ed = (a.end_date || '').substring(0, 10);
+        let detail = '';
+        if (a.app_type == '请假') detail = a.leave_type + ' ' + a.days + '天';
+        else if (a.app_type == '加班') detail = sd + ' ' + (a.overtime_hours||'') + '小时→' + a.days + '天调休';
+        else if (a.app_type == '调休补假') detail = a.days + '天';
+
+        html += '<tr>' +
+            '<td>' + a.emp_name + '</td>' +
+            '<td><span class="tag tag-' + a.app_type + '">' + a.app_type + '</span></td>' +
+            '<td style="font-size:12px;color:#a0b4d0;">' + detail + '</td>' +
+            '<td><span class="status status-' + a.status + '">' + a.status + '</span></td>' +
+            '<td><small>' + (a.approver_comment || '-') + '</small></td>' +
+            '<td><small style="color:#6679a0;">' + (a.created_at||'').slice(0,16) + '</small></td>' +
+            '<td>' + (a.status === '待审批' ? '<button class="btn btn-sm btn-outline" onclick="openApprove(' + a.id + ')">审批</button>' : '-') + '</td>' +
+            '</tr>';
+    });
+    html += '</tbody></table>';
+    container.innerHTML = html;
+}
+
+function exportApprovals() {
+    const from = document.getElementById('filterFrom').value;
+    const to = document.getElementById('filterTo').value;
+    const empFilter = document.getElementById('filterEmp').value;
+    let filtered = allApps;
+    if (from) filtered = filtered.filter(a => (a.created_at||'').slice(0,10) >= from);
+    if (to) filtered = filtered.filter(a => (a.created_at||'').slice(0,10) <= to);
+    if (empFilter) filtered = filtered.filter(a => a.emp_name === empFilter);
+
+    const headers = ['员工','类型','详情','状态','审批人','审批意见','抄送人','提交时间'];
+    let csv = '\uFEFF' + headers.join(',') + '\n';
+    filtered.forEach(a => {
+        const sd = (a.start_date || '').slice(0,10);
+        let detail = '';
+        if (a.app_type == '请假') detail = (a.leave_type||'') + ' ' + (a.days||'') + '天';
+        else if (a.app_type == '加班') detail = sd + ' ' + (a.overtime_hours||'') + '小时';
+        else if (a.app_type == '调休补假') detail = (a.days||'') + '天';
+        csv += [a.emp_name, a.app_type, detail, a.status, a.approver||'', a.approver_comment||'', '', (a.created_at||'').slice(0,16)].join(',') + '\n';
+    });
+    const blob = new Blob([csv], {type:'text/csv;charset=utf-8;'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = '审批记录_' + new Date().toISOString().slice(0,10) + '.csv';
+    a.click(); URL.revokeObjectURL(url);
+}
+
+function createCard(a) {
+    const sd = (a.start_date || '').substring(0, 10);
+    const ed = (a.end_date || '').substring(0, 10);
+    const st = (a.start_date || '').substring(11, 16);
+    const et = (a.end_date || '').substring(11, 16);
+    const timeStr = (st && et) ? ` ${st}~${et}` : '';
+    let detail = '';
+    if (a.app_type == '请假') detail = `<div class="detail-dates">📅 ${sd} ~ ${ed}${timeStr} (${a.days}天)</div><div class="detail-reason">${a.reason || '无'}</div>`;
+    else if (a.app_type == '加班') {
+        const st2 = a.start_date || a.overtime_date || '';
+        detail = `<div class="detail-dates">📅 ${st2}</div><div class="detail-reason">${a.reason || '无'}</div><div class="detail-comp">⏱ ${a.overtime_hours}小时 → 调休 <strong>${a.days}</strong> 天</div>`;
+    }
+    else if (a.app_type == '调休补假') detail = `<div class="detail-dates">📅 ${sd} ~ ${ed}${timeStr} (${a.days}天)</div><div class="detail-reason">${a.reason || '无'}</div>`;
+
+    return `
+    <div class="approval-card">
+        <div class="approval-header">
+            <div class="approval-user">
+                <span class="avatar">${a.emp_name[0]}</span>
+                <div>
+                    <strong>${a.emp_name}</strong>
+                    <span class="text-muted">${a.emp_code}</span>
+                </div>
+            </div>
+            <span class="tag tag-${a.app_type}">${a.app_type}</span>
+        </div>
+        <div class="approval-body">${detail}</div>
+        <div class="approval-actions">
+            <button class="btn btn-sm btn-success" onclick="quickApprove(${a.id},'approve')">✅ 批准</button>
+            <button class="btn btn-sm btn-danger" onclick="quickApprove(${a.id},'reject')">❌ 驳回</button>
+            <button class="btn btn-sm btn-outline" onclick="openApprove(${a.id})">详情</button>
+        </div>
+    </div>`;
+}
+
+function openApprove(id) {
+    currentApproveId = id;
+    const a = allApps.find(x => x.id === id);
+    if (!a) return;
+
+    let detailHtml = `
+    <div class="detail-row"><strong>员工：</strong> ${a.emp_name} (${a.emp_code})</div>
+    <div class="detail-row"><strong>类型：</strong> ${a.app_type}</div>`;
+
+    if (a.app_type == '请假') {
+        const sd = (a.start_date||'').substring(0,10);
+        const ed = (a.end_date||'').substring(0,10);
+        const st = (a.start_date||'').substring(11,16);
+        const et = (a.end_date||'').substring(11,16);
+        const timeStr = (st && et) ? ` ${st}~${et}` : '';
+        detailHtml += `
+        <div class="detail-row"><strong>假别：</strong> ${a.leave_type}</div>
+        <div class="detail-row"><strong>期间：</strong> ${sd} ~ ${ed}${timeStr} (${a.days}天)</div>`;
+    } else if (a.app_type == '加班') {
+        detailHtml += `
+        <div class="detail-row"><strong>开始：</strong> ${a.start_date || a.overtime_date}</div>
+        <div class="detail-row"><strong>结束：</strong> ${a.end_date || a.overtime_date}</div>
+        <div class="detail-row"><strong>时长：</strong> ${a.overtime_hours}小时 (${a.overtime_type})</div>
+        <div class="detail-row"><strong>产生调休：</strong> ${a.days}天</div>`;
+    } else if (a.app_type == '调休补假') {
+        const sd = (a.start_date||'').substring(0,10);
+        const ed = (a.end_date||'').substring(0,10);
+        detailHtml += `
+        <div class="detail-row"><strong>期间：</strong> ${sd} ~ ${ed} (${a.days}天)</div>`;
+    }
+    detailHtml += `<div class="detail-row"><strong>事由：</strong> ${a.reason || '无'}</div>
+    <div class="detail-row"><strong>提交时间：</strong> ${a.created_at || ''}</div>`;
+
+    document.getElementById('approveDetail').innerHTML = detailHtml;
+    document.getElementById('approveComment').value = '';
+    document.getElementById('approveResult').innerHTML = '';
+    document.getElementById('approveModal').style.display = 'flex';
+}
+
+function closeModal(id) {
+    document.getElementById(id).style.display = 'none';
+}
+
+async function quickApprove(id, action) {
+    const res = await fetch('/api/applications/approve', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+            application_id: id,
+            action: action,
+            comment: action === 'approve' ? '批准' : '驳回'
+        })
+    });
+    const data = await res.json();
+    if (!data.success) alert('❌ ' + data.error);
+    loadApprovals();
+}
+
+async function doApprove(action) {
+    const comment = document.getElementById('approveComment').value;
+    const res = await fetch('/api/applications/approve', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ application_id: currentApproveId, action, comment })
+    });
+    const data = await res.json();
+    document.getElementById('approveResult').innerHTML = data.success ? `✅ ${data.message}` : `❌ ${data.error}`;
+    if (data.success) {
+        loadApprovals();
+        setTimeout(() => closeModal('approveModal'), 1000);
+    }
+}
+
+function switchTab(tab, btn) {
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById('pendingSection').style.display = tab === 'pending' ? 'block' : 'none';
+    document.getElementById('allSection').style.display = tab === 'all' ? 'block' : 'none';
+}
+
+loadApprovals();
+</script>
+{% endblock %}
