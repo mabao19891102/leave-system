@@ -1,0 +1,420 @@
+{% extends "base.html" %}
+{% block title %}员工管理{% endblock %}
+{% block content %}
+<div class="page-header">
+    <h1>👥 员工管理</h1>
+    <p class="text-muted">管理员工信息 · 岗位状态可直接下拉修改</p>
+</div>
+
+<div class="toolbar">
+    <button class="btn btn-primary" onclick="showAddEmployee()">➕ 添加员工</button>
+    <button class="btn btn-secondary" onclick="recalculate()">🔄 重新计算年假</button>
+    <button class="btn btn-sm btn-outline" onclick="toggleDeleted()" id="showDeletedBtn">👁 显示已删除</button>
+    <div class="search-box">
+        <input type="text" id="searchInput" placeholder="搜索员工..." oninput="filterEmployees()">
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-body p-0">
+        <div class="table-scroll">
+            <table class="table" id="employeeTable">
+                <thead>
+                    <tr class="thead-primary">
+                        <th style="width:72px;">姓名</th><th style="width:60px;">编号</th><th style="width:56px;">学历</th><th style="width:90px;">入职时间</th><th style="width:76px;">岗位<br><small>点击修改</small></th><th style="width:90px;">入组时间</th>
+                        <th style="width:44px;">寒假</th><th style="width:44px;">暑假</th>
+                        <th colspan="2" style="width:84px;">加班天数</th>
+                        <th colspan="2" style="width:84px;">年假总额<br><small>=寒+暑+加班</small></th>
+                        <th style="width:56px;">已休<br>年假</th><th style="width:56px;">剩余<br>年假</th>
+                        <th style="width:44px;">调休</th><th style="width:56px;">剩余<br>调休</th>
+                        <th style="width:48px;">操作</th>
+                    </tr>
+                    <tr class="thead-sub">
+                        <th></th><th></th><th></th><th></th><th></th><th></th>
+                        <th></th><th></th>
+                        <th>天数</th><th>小时</th>
+                        <th>天数</th><th>小时</th>
+                        <th></th><th></th><th></th><th></th><th></th>
+                    </tr>
+                </thead>
+                <tbody id="employeeBody">
+                    <tr><td colspan="17" class="text-center">加载中...</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<!-- Add Employee Modal -->
+<div class="modal" id="addModal">
+    <div class="modal-content" style="width:460px;">
+        <div class="modal-header">
+            <h2>➕ 添加员工</h2>
+            <span class="close" onclick="closeModal('addModal')">&times;</span>
+        </div>
+        <div class="modal-body">
+            <div class="form-group">
+                <label>姓名 *</label>
+                <input type="text" id="addName" placeholder="请输入姓名">
+            </div>
+            <div class="form-group">
+                <label>职工编号 *</label>
+                <input type="text" id="addEmpId" placeholder="如 012345">
+            </div>
+            <div class="form-group">
+                <label>入职日期 *</label>
+                <input type="date" id="addHireDate">
+            </div>
+            <div class="form-group">
+                <label>入组时间</label>
+                <input type="date" id="addJoinDate">
+            </div>
+            <div class="form-group">
+                <label>岗位状态</label>
+                <select id="addPosition" class="form-select">
+                    <option value="在岗">在岗</option>
+                    <option value="已轮转">已轮转</option>
+                </select>
+            </div>
+            <button class="btn btn-primary" onclick="doAddEmployee()">确认添加</button>
+            <div id="addResult" class="mt-2"></div>
+        </div>
+    </div>
+</div>
+
+<!-- Edit Modal -->
+<div class="modal" id="editModal">
+    <div class="modal-content" style="width:520px;">
+        <div class="modal-header">
+            <h2 id="editTitle">编辑假期额度</h2>
+            <span class="close" onclick="closeModal('editModal')">&times;</span>
+        </div>
+        <div class="modal-body">
+            <input type="hidden" id="editEmpId">
+            <div class="form-row">
+                <div class="form-group half">
+                    <label>岗位状态</label>
+                    <select id="editPosition" class="form-select">
+                        <option value="在岗">在岗</option>
+                        <option value="已轮转">已轮转</option>
+                    </select>
+                </div>
+                <div class="form-group half">
+                    <label>学历</label>
+                    <div class="edu-wrapper">
+                        <select id="editEducationSelect" class="form-select" onchange="onEduChange()" style="width:100%;">
+                            <option value="">-- 请选择 --</option>
+                            <option value="博士">博士</option>
+                            <option value="硕士">硕士</option>
+                            <option value="本科">本科</option>
+                            <option value="大专">大专</option>
+                            <option value="__custom__">✏️ 自定义...</option>
+                        </select>
+                        <input type="text" id="editEducationCustom" style="display:none;margin-top:6px;" placeholder="输入自定义学历" class="form-input">
+                    </div>
+                </div>
+            </div>
+            <div class="form-row">
+                <div class="form-group half">
+                    <label>入职时间</label>
+                    <input type="date" id="editHireDate">
+                </div>
+                <div class="form-group half">
+                    <label>入组时间</label>
+                    <input type="date" id="editJoinDate">
+                </div>
+            </div>
+            <div class="form-group">
+                <label>🏖️ 寒假天数</label>
+                <input type="number" id="editWinter" step="0.5" min="0" onchange="previewAnnual()">
+            </div>
+            <div class="form-group">
+                <label>☀️ 暑假天数</label>
+                <input type="number" id="editSummer" step="0.5" min="0" onchange="previewAnnual()">
+            </div>
+            <div class="calc-preview" id="annualPreview">公式 = 寒假 + 暑假 + 加班天数</div>
+            <div class="form-group">
+                <label>📊 年假总额（可手动修改）</label>
+                <input type="number" id="editAnnual" step="0.5" min="0">
+                <small class="form-hint">留空自动按公式计算</small>
+            </div>
+            <div class="form-group">
+                <label>调休总额度（天）</label>
+                <input type="number" id="editComp" step="0.5" min="0">
+            </div>
+            <button class="btn btn-primary" onclick="saveBalance()">保存</button>
+            <div id="editResult" class="mt-2"></div>
+            <div class="mt-3" style="border-top:1px solid #eee;padding-top:12px;text-align:right;">
+                <a href="#" onclick="deleteEmployee()" style="color:#e74c3c;font-size:12px;text-decoration:none;">🗑 删除此员工</a>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let employees = [];
+let showDeleted = false;
+
+async function loadEmployees() {
+    const res = await fetch('/api/employees' + (showDeleted ? '?show_deleted=1' : ''));
+    employees = await res.json();
+    renderEmployees(employees);
+}
+
+function renderEmployees(data) {
+    const tbody = document.getElementById('employeeBody');
+    if (!data.length) {
+        tbody.innerHTML = '<tr><td colspan="15" class="text-center">暂无数据</td></tr>';
+        return;
+    }
+    tbody.innerHTML = data.map(e => {
+        const ot_days = e.overtime_days_display || 0;
+        const ot_hours = e.overtime_hours_display || 0;
+        const an_days = e.annual_days_display || 0;
+        const an_hours = e.annual_hours_display || 0;
+        const status = e.position_status || '在岗';
+        const jdate = e.join_group_date || '';
+        const edu = e.education || '';
+        const hdate = e.hire_date || '';
+        const isDel = e.is_active === 0;
+        const rowStyle = isDel ? 'style="opacity:0.5;text-decoration:line-through;"' : '';
+        return `<tr ${rowStyle}>
+            <td><strong>${e.name}${isDel ? ' (已删除)' : ''}</strong></td>
+            <td>${e.employee_id}</td>
+            <td>${edu || '-'}</td>
+            <td>${hdate || '-'}</td>
+            <td>
+                <select class="status-select" onchange="quickUpdateStatus(${e.id}, this.value)" ${isDel ? 'disabled' : ''}>
+                    <option value="在岗" ${status==='在岗'?'selected':''}>在岗</option>
+                    <option value="已轮转" ${status==='已轮转'?'selected':''}>已轮转</option>
+                </select>
+            </td>
+            <td>${jdate || '-'}</td>
+            <td>${e.winter_vacation || 0}</td>
+            <td>${e.summer_vacation || 0}</td>
+            <td>${ot_days}</td>
+            <td><span class="tag tag-gray">${parseInt(ot_hours)}h</span></td>
+            <td><strong>${an_days}</strong></td>
+            <td><span class="tag tag-gray">${parseInt(an_hours)}h</span></td>
+            <td>${e.used_annual ?? 0}</td>
+            <td><span class="tag ${(e.remaining_annual || 0) > 0 ? 'tag-green' : 'tag-gray'}">${e.remaining_annual ?? 0}</span></td>
+            <td>${e.comp_days ?? 0}</td>
+            <td><span class="tag ${(e.remaining_comp || 0) > 0 ? 'tag-green' : 'tag-gray'}">${e.remaining_comp ?? 0}</span></td>
+            <td>
+                ${isDel
+                    ? `<button class="btn btn-sm btn-success" onclick="restoreEmployee(${e.id},'${e.name}')">↩ 恢复</button>`
+                    : `<button class="btn btn-sm btn-outline" onclick="editBalance(${e.id},'${e.name}',${e.winter_vacation||0},${e.summer_vacation||0},${e.comp_days||0},'${status}','${jdate}','${edu}')">编辑</button>`
+                }
+            </td>
+        </tr>`;
+    }).join('');
+}
+
+function toggleDeleted() {
+    showDeleted = !showDeleted;
+    document.getElementById('showDeletedBtn').textContent = showDeleted ? '👁 隐藏已删除' : '👁 显示已删除';
+    loadEmployees();
+}
+
+function filterEmployees() {
+    const q = document.getElementById('searchInput').value.trim().toLowerCase();
+    if (!q) { renderEmployees(employees); return; }
+    renderEmployees(employees.filter(e => e.name.includes(q) || e.employee_id.includes(q)));
+}
+
+// ── Quick Status Update (inline dropdown) ──────
+
+async function quickUpdateStatus(id, status) {
+    await fetch('/api/admin/quick-update-status', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ employee_id: id, position_status: status })
+    });
+}
+
+// ── Add Employee ──────────────────────────────
+
+function showAddEmployee() {
+    document.getElementById('addName').value = '';
+    document.getElementById('addEmpId').value = '';
+    const today = new Date().toISOString().slice(0,10);
+    document.getElementById('addHireDate').value = today;
+    document.getElementById('addJoinDate').value = today;
+    document.getElementById('addPosition').value = '在岗';
+    document.getElementById('addResult').innerHTML = '';
+    document.getElementById('addModal').style.display = 'flex';
+}
+
+async function doAddEmployee() {
+    const data = {
+        name: document.getElementById('addName').value.trim(),
+        employee_id: document.getElementById('addEmpId').value.trim(),
+        hire_date: document.getElementById('addHireDate').value,
+        join_group_date: document.getElementById('addJoinDate').value,
+        position_status: document.getElementById('addPosition').value
+    };
+    if (!data.name || !data.employee_id || !data.hire_date) {
+        document.getElementById('addResult').innerHTML = '❌ 请填写完整信息';
+        return;
+    }
+    const res = await fetch('/api/admin/add-employee', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(data)
+    });
+    const result = await res.json();
+    document.getElementById('addResult').innerHTML = result.success ? `✅ ${result.message}` : `❌ ${result.error}`;
+    if (result.success) {
+        loadEmployees();
+        setTimeout(() => closeModal('addModal'), 1500);
+    }
+}
+
+// ── Edit ──────────────────────────────────────
+
+function editBalance(id, name, winter, summer, comp, status, joinDate, edu) {
+    document.getElementById('editEmpId').value = id;
+    document.getElementById('editWinter').value = winter;
+    document.getElementById('editSummer').value = summer;
+    document.getElementById('editAnnual').value = '';
+    document.getElementById('editComp').value = comp;
+    document.getElementById('editPosition').value = status || '在岗';
+    // Set education - check if it's a predefined value
+    const predefined = ['博士','硕士','本科','大专',''];
+    if (predefined.includes(edu)) {
+        document.getElementById('editEducationSelect').value = edu;
+        document.getElementById('editEducationCustom').style.display = 'none';
+    } else {
+        document.getElementById('editEducationSelect').value = '__custom__';
+        document.getElementById('editEducationCustom').value = edu;
+        document.getElementById('editEducationCustom').style.display = 'block';
+    }
+    document.getElementById('editJoinDate').value = joinDate || '';
+    // Set hire_date from employees data
+    const emp = employees.find(e => e.id === id);
+    document.getElementById('editHireDate').value = emp ? (emp.hire_date || '') : '';
+    document.getElementById('editTitle').textContent = `编辑 - ${name}`;
+    previewAnnual();
+    document.getElementById('editModal').style.display = 'flex';
+    document.getElementById('editResult').innerHTML = '';
+}
+
+function closeModal(id) {
+    document.getElementById(id).style.display = 'none';
+}
+
+function onEduChange() {
+    const sel = document.getElementById('editEducationSelect');
+    const custom = document.getElementById('editEducationCustom');
+    if (sel.value === '__custom__') {
+        custom.style.display = 'block';
+        custom.focus();
+    } else {
+        custom.style.display = 'none';
+    }
+}
+
+function getEducation() {
+    const sel = document.getElementById('editEducationSelect');
+    const custom = document.getElementById('editEducationCustom');
+    return sel.value === '__custom__' ? custom.value.trim() : sel.value;
+}
+
+function previewAnnual() {
+    const winter = parseFloat(document.getElementById('editWinter').value) || 0;
+    const summer = parseFloat(document.getElementById('editSummer').value) || 0;
+    const empId = parseInt(document.getElementById('editEmpId').value);
+    const emp = employees.find(e => e.id === empId);
+    const ot = emp ? (emp.overtime_earned || 0) : 0;
+    const totalDays = winter + summer + ot;
+    const totalHours = totalDays * 8;
+    const dispDays = Math.floor(totalHours / 4) / 2;
+    const dispHours = totalHours - (dispDays * 8);
+    document.getElementById('annualPreview').innerHTML =
+        `公式 = 寒假${winter}+暑假${summer}+加班${ot} = ${totalDays}天 = ` +
+        `<strong>${dispDays}天 ${parseInt(dispHours)}小时</strong>`;
+}
+
+async function saveBalance() {
+    const id = document.getElementById('editEmpId').value;
+    const winter = parseFloat(document.getElementById('editWinter').value) || 0;
+    const summer = parseFloat(document.getElementById('editSummer').value) || 0;
+    const comp = parseFloat(document.getElementById('editComp').value) || 0;
+    const annualInput = document.getElementById('editAnnual').value.trim();
+    const position = document.getElementById('editPosition').value;
+    const joinDate = document.getElementById('editJoinDate').value;
+
+    const data = {
+        employee_id: parseInt(id),
+        winter_vacation: winter,
+        summer_vacation: summer,
+        comp_days: comp,
+        position_status: position,
+        join_group_date: joinDate,
+        education: getEducation()
+    };
+    // Also update hire_date if changed
+    const hireDate = document.getElementById('editHireDate').value;
+    if (hireDate) data.hire_date = hireDate;
+    if (annualInput !== '') {
+        data.annual_days = parseFloat(annualInput) || 0;
+    }
+    const res = await fetch('/api/admin/update-balance', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(data)
+    });
+    const result = await res.json();
+    document.getElementById('editResult').innerHTML = result.success ? `✅ ${result.message}` : `❌ ${result.error}`;
+    if (result.success) {
+        loadEmployees();
+        setTimeout(() => closeModal('editModal'), 2000);
+    }
+}
+
+async function recalculate() {
+    if (!confirm('将重新计算所有员工的年假（年假=寒假+暑假+加班天数），确认？')) return;
+    const res = await fetch('/api/admin/recalculate', { method: 'POST' });
+    const data = await res.json();
+    alert(data.message);
+    loadEmployees();
+}
+
+async function deleteEmployee() {
+    const id = parseInt(document.getElementById('editEmpId').value);
+    const name = document.getElementById('editTitle').textContent.replace('编辑 - ', '');
+    if (!confirm(`确定要删除员工 "${name}" 吗？可在「显示已删除」中恢复。`)) return;
+    const res = await fetch('/api/admin/delete-employee', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ employee_id: id })
+    });
+    const data = await res.json();
+    if (data.success) {
+        alert(`✅ 已删除，可在「显示已删除」中恢复`);
+        closeModal('editModal');
+        loadEmployees();
+    } else {
+        alert(`❌ ${data.error}`);
+    }
+}
+
+async function restoreEmployee(id, name) {
+    if (!confirm(`恢复员工 "${name}" ？`)) return;
+    const res = await fetch('/api/admin/restore-employee', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ employee_id: id })
+    });
+    const data = await res.json();
+    if (data.success) {
+        alert(`✅ ${data.message}`);
+        loadEmployees();
+    }
+}
+
+loadEmployees();
+</script>
+{% endblock %}
