@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>{% block title %}假期管理系统{% endblock %} - 药事管理组</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+    <div class="layout">
+        <!-- Sidebar -->
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                <a href="/" style="text-decoration:none;color:white;">
+                    <div style="display:flex;align-items:center;gap:10px;margin-bottom:4px;">
+                        <div style="width:36px;height:36px;background:linear-gradient(135deg,#667eea,#764ba2);border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0;">📋</div>
+                        <div>
+                            <div style="font-size:13px;font-weight:600;line-height:1.2;">西安交大一附院</div>
+                            <div style="font-size:11px;color:#8899b4;line-height:1.2;">药事管理组</div>
+                        </div>
+                    </div>
+                </a>
+            </div>
+            <nav class="nav">
+                <a href="/" class="nav-item {% if request.path == '/' %}active{% endif %}">
+                    <span class="nav-icon">📊</span> 首页
+                </a>
+                <a href="/my" class="nav-item {% if request.path == '/my' %}active{% endif %}">
+                    <span class="nav-icon">👤</span> 我的假期
+                </a>
+                <a href="/applications" class="nav-item {% if request.path == '/applications' %}active{% endif %}">
+                    <span class="nav-icon">📝</span> 申请中心{% if session.get('role') == 'viewer' %}（仅查看）{% endif %}
+                </a>
+                {% if session.get('role') in ('admin','approver') %}
+                <a href="/employees" class="nav-item {% if request.path == '/employees' %}active{% endif %}">
+                    <span class="nav-icon">👥</span> 员工管理
+                </a>
+                <a href="/approvals" class="nav-item {% if request.path == '/approvals' %}active{% endif %}">
+                    <span class="nav-icon">✅</span> 审批管理
+                </a>
+                {% endif %}
+                {% if session.get('role') == 'admin' %}
+                <a href="/permissions" class="nav-item {% if request.path == '/permissions' %}active{% endif %}">
+                    <span class="nav-icon">🔐</span> 权限管理
+                </a>
+                {% endif %}
+                {% if session.get('role') == 'viewer' %}
+                <a href="/balance-view" class="nav-item {% if request.path == '/balance-view' %}active{% endif %}">
+                    <span class="nav-icon">📊</span> 余额查询
+                </a>
+                {% endif %}
+                <a href="/reports" class="nav-item {% if request.path == '/reports' %}active{% endif %}">
+                    <span class="nav-icon">📈</span> 统计报表
+                </a>
+                <a href="/monthly-report" class="nav-item {% if request.path == '/monthly-report' %}active{% endif %}">
+                    <span class="nav-icon">📅</span> 月度汇总
+                </a>
+                <a href="/change-password" class="nav-item {% if request.path == '/change-password' %}active{% endif %}">
+                    <span class="nav-icon">🔑</span> 修改密码
+                </a>
+                {% if session.get('role') == 'admin' %}
+                <a href="/admin-passwords" class="nav-item {% if request.path == '/admin-passwords' %}active{% endif %}">
+                    <span class="nav-icon">🔐</span> 密码管理
+                </a>
+                {% endif %}
+            </nav>
+            <div class="sidebar-footer">
+                <div class="user-info">
+                    <span class="avatar-sm">{{ session.get('user', '?')[0] }}</span>
+                    <div>
+                        <div class="user-name">{{ session.get('user', '用户') }}</div>
+                        <span class="role-badge">{{ {'admin':'超级管理员','approver':'审批人','viewer':'查看者','employee':'员工'}.get(session.get('role'),'员工') }}</span>
+                    </div>
+                </div>
+                <a href="/logout" class="logout-btn">退出登录</a>
+            </div>
+        </aside>
+
+        <!-- Main -->
+        <main class="main-content">
+            {% block content %}{% endblock %}
+        </main>
+    </div>
+
+    <script src="/static/js/app.js"></script>
+    {% block scripts %}{% endblock %}
+</body>
+</html>
